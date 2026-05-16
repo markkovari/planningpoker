@@ -84,6 +84,8 @@ impl EventStore for NatsEventStore {
             .create_consumer_on_stream(
                 jetstream::consumer::pull::Config {
                     filter_subject: subject_filter.to_string(),
+                    // Auto-delete consumer after 5s inactivity so they don't accumulate.
+                    inactive_threshold: Duration::from_secs(5),
                     ..Default::default()
                 },
                 STREAM_NAME,
@@ -94,6 +96,7 @@ impl EventStore for NatsEventStore {
         let mut messages = consumer
             .fetch()
             .max_messages(10_000)
+            .expires(Duration::from_secs(5))
             .messages()
             .await
             .map_err(|e| StoreError::Stream(e.to_string()))?;

@@ -8,6 +8,7 @@ export function usePokerSocket(url: string) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdRoomId, setCreatedRoomId] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const queue = useRef<ClientMessage[]>([]);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -35,10 +36,6 @@ export function usePokerSocket(url: string) {
       }
     };
 
-    socket.onerror = () => {
-      // onerror always fires before onclose; onclose handles reconnect
-    };
-
     socket.onmessage = (evt) => {
       try {
         const msg: ServerMessage = JSON.parse(evt.data as string);
@@ -46,10 +43,13 @@ export function usePokerSocket(url: string) {
           setRoom(msg.room);
         } else if (msg.type === "RoomCreated") {
           setCreatedRoomId(msg.room_id);
+        } else if (msg.type === "CountdownTick") {
+          setCountdown(msg.remaining_secs > 0 ? msg.remaining_secs : null);
         } else if (msg.type === "Error") {
           setError(msg.message);
         }
-      } catch {
+      } catch (err) {
+        console.error("WS parse error", err);
         setError("invalid message from server");
       }
     };
@@ -73,5 +73,5 @@ export function usePokerSocket(url: string) {
     }
   }, []);
 
-  return { room, connected, error, createdRoomId, send };
+  return { room, connected, error, createdRoomId, countdown, send };
 }

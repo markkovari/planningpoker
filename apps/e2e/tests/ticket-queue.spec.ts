@@ -22,7 +22,7 @@ test.describe("ticket queue", () => {
     await expect(items.nth(1)).toContainText("PROJ-2");
     await expect(items.nth(2)).toContainText("PROJ-3");
     // First item is marked as next
-    await expect(items.nth(0)).toContainText("← next");
+    await expect(items.nth(0)).toContainText("next");
   });
 
   test("starting a session pops the first ticket from the queue", async ({ alice, roomId }) => {

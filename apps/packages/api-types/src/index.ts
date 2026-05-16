@@ -48,12 +48,12 @@ export interface RoomView {
 // ---- WebSocket: client → server ----
 
 export type ClientMessage =
-  | { type: "CreateRoom"; name: string }
+  | { type: "CreateRoom"; name: string; deck_type?: DeckType }
   | { type: "AddTicket"; room_id: string; title: string; description?: string }
   | { type: "JoinRoom"; room_id: string; participant_id: string; display_name: string }
   | { type: "CastVote"; room_id: string; session_id: string; card: string }
   | { type: "RetractVote"; room_id: string; session_id: string }
-  | { type: "StartSession"; room_id: string; ticket_id?: string; ticket_description?: string }
+  | { type: "StartSession"; room_id: string; ticket_id?: string; ticket_description?: string; countdown_secs?: number }
   | { type: "RevealVotes"; room_id: string; session_id: string }
   | { type: "ResetSession"; room_id: string; session_id: string };
 
@@ -63,7 +63,8 @@ export type ServerMessage =
   | { type: "RoomCreated"; room_id: string; name: string }
   | { type: "RoomState"; room: RoomView }
   | { type: "EventApplied"; event: DomainEvent }
-  | { type: "Error"; message: string };
+  | { type: "Error"; message: string }
+  | { type: "CountdownTick"; room_id: string; session_id: string; remaining_secs: number };
 
 // ---- Domain events (mirrors pp-events) ----
 

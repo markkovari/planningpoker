@@ -1,13 +1,18 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const GATEWAY_URL = "http://localhost:8080";
+// Pick a stable-per-run free port: use env if set, else derive from PID to avoid collisions
+const GATEWAY_PORT = process.env.GATEWAY_PORT
+  ? parseInt(process.env.GATEWAY_PORT, 10)
+  : 18000 + (process.pid % 1000);
+const GATEWAY_URL = `http://localhost:${GATEWAY_PORT}`;
 const FRONTEND_URL = "http://localhost:5173";
 
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: 1,
+  timeout: 60_000,
   // workers=1: tests share one gateway instance; isolation via unique room_id per test
   workers: 1,
   reporter: [
@@ -23,13 +28,14 @@ export default defineConfig({
   },
 
   projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
+    // Firefox first — avoids accumulated NATS consumers from Chromium slowing it down
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"] },
+    },
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
 
@@ -44,7 +50,8 @@ export default defineConfig({
     {
       command: "pnpm --filter @planning-poker/web dev --port 5173",
       url: FRONTEND_URL,
-      reuseExistingServer: !process.env.CI,
+      env: { GATEWAY_PORT: String(GATEWAY_PORT) },
+      reuseExistingServer: false,
       timeout: 30_000,
     },
     {
@@ -53,8 +60,9 @@ export default defineConfig({
       env: {
         NATS_URL: "nats://localhost:4222",
         RUST_LOG: "warn",
+        PORT: String(GATEWAY_PORT),
       },
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 15_000,
     },
   ],

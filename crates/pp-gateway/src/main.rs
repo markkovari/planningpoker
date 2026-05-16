@@ -72,7 +72,8 @@ async fn main() -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    let addr = "0.0.0.0:8080";
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8081".to_string());
+    let addr = format!("0.0.0.0:{port}");
     info!("listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;

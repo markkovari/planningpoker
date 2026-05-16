@@ -1,4 +1,13 @@
-import React from "react";
+import { cn } from "./components/utils";
+
+const CARD_LABELS: Record<string, string> = {
+  "?": "Unknown / unsure",
+  "☕": "Coffee break needed",
+};
+
+function cardLabel(card: string): string {
+  return CARD_LABELS[card] ?? `Vote ${card}`;
+}
 
 interface CardPickerProps {
   cards: string[];
@@ -9,21 +18,25 @@ interface CardPickerProps {
 
 export function CardPicker({ cards, selected, onSelect, disabled }: CardPickerProps) {
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div className="flex flex-wrap gap-3" role="group" aria-label="Vote card picker">
       {cards.map((card) => (
         <button
           key={card}
+          type="button"
+          role="radio"
+          aria-checked={selected === card}
+          aria-label={cardLabel(card)}
           onClick={() => !disabled && onSelect(card)}
           disabled={disabled}
-          style={{
-            padding: "12px 20px",
-            fontSize: 18,
-            fontWeight: selected === card ? "bold" : "normal",
-            border: selected === card ? "2px solid #2563eb" : "2px solid #d1d5db",
-            borderRadius: 8,
-            cursor: disabled ? "not-allowed" : "pointer",
-            background: selected === card ? "#eff6ff" : "#fff",
-          }}
+          className={cn(
+            "relative h-24 w-16 sm:h-28 sm:w-20 rounded-xl border-2 text-xl sm:text-2xl font-bold transition-all",
+            "hover:scale-105 active:scale-95 hover:shadow-lg",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2",
+            "disabled:cursor-not-allowed disabled:opacity-50",
+            selected === card
+              ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-lg scale-105"
+              : "border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--card-foreground))] hover:border-[hsl(var(--primary))]/50"
+          )}
         >
           {card}
         </button>

@@ -1,5 +1,10 @@
 import type { Locator, Page } from "@playwright/test";
 
+const CARD_ARIA_LABELS: Record<string, string> = {
+  "?": "Unknown / unsure",
+  "☕": "Coffee break needed",
+};
+
 export class RoomPage {
   readonly page: Page;
 
@@ -24,6 +29,8 @@ export class RoomPage {
   readonly startSessionBtn: Locator;
   readonly revealBtn: Locator;
   readonly resetBtn: Locator;
+  readonly startNewBtn: Locator;
+  readonly reVoteBtn: Locator;
   readonly noSession: Locator;
   readonly cardPicker: Locator;
   readonly voteReveal: Locator;
@@ -49,6 +56,8 @@ export class RoomPage {
     this.startSessionBtn = page.getByTestId("start-session-btn");
     this.revealBtn = page.getByTestId("reveal-btn");
     this.resetBtn = page.getByTestId("reset-btn");
+    this.startNewBtn = page.getByTestId("start-new-btn");
+    this.reVoteBtn = page.getByTestId("reset-from-reveal-btn");
     this.noSession = page.getByTestId("no-session");
     this.cardPicker = page.getByTestId("card-picker");
     this.voteReveal = page.getByTestId("vote-reveal");
@@ -60,8 +69,6 @@ export class RoomPage {
   }
 
   async createRoom(roomName: string): Promise<string> {
-    // Expand the <details> create section
-    await this.page.getByText("Create a new room").click();
     await this.roomNameInput.waitFor({ state: "visible" });
     await this.roomNameInput.fill(roomName);
     await this.createRoomBtn.click();
@@ -92,7 +99,8 @@ export class RoomPage {
   }
 
   async selectCard(card: string) {
-    await this.cardPicker.getByRole("button", { name: card, exact: true }).click();
+    const label = CARD_ARIA_LABELS[card] ?? `Vote ${card}`;
+    await this.cardPicker.getByRole("radio", { name: label, exact: true }).click();
   }
 
   async waitForVoteCheckmark(participantDisplayName: string) {

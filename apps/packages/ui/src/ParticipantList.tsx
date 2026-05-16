@@ -1,5 +1,6 @@
 import type { ParticipantView, VoteView } from "@planning-poker/api-types";
-import React from "react";
+import { Badge } from "./components/badge";
+import { cn } from "./components/utils";
 
 interface ParticipantListProps {
   participants: ParticipantView[];
@@ -11,7 +12,7 @@ export function ParticipantList({ participants, votes, revealed }: ParticipantLi
   const voteMap = new Map(votes.map((v) => [v.participant_id, v]));
 
   return (
-    <ul data-testid="participant-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+    <ul data-testid="participant-list" className="space-y-2 p-0 m-0 list-none">
       {participants.map((p) => {
         const vote = voteMap.get(p.id);
         const hasVoted = vote?.has_voted ?? false;
@@ -19,45 +20,28 @@ export function ParticipantList({ participants, votes, revealed }: ParticipantLi
         let badge: React.ReactNode;
         if (revealed && hasVoted) {
           badge = (
-            <span style={{
-              background: "#1a73e8", color: "#fff",
-              borderRadius: 4, padding: "2px 10px", fontWeight: "bold", fontSize: 15,
-            }}>
+            <Badge variant="default" className="text-sm font-bold px-3 shrink-0">
               {vote?.card ?? "?"}
-            </span>
+            </Badge>
           );
         } else if (hasVoted) {
-          badge = (
-            <span style={{
-              background: "#34a853", color: "#fff",
-              borderRadius: 4, padding: "2px 10px", fontSize: 13,
-            }}>
-              voted ✓
-            </span>
-          );
+          badge = <Badge variant="success" className="shrink-0">voted ✓</Badge>;
         } else {
-          badge = (
-            <span style={{
-              background: "#f1f3f4", color: "#888",
-              borderRadius: 4, padding: "2px 10px", fontSize: 13,
-            }}>
-              waiting…
-            </span>
-          );
+          badge = <Badge variant="muted" className="shrink-0">waiting…</Badge>;
         }
 
         return (
           <li
             key={p.id}
             data-testid={`participant-${p.id}`}
-            style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              padding: "8px 0", borderBottom: "1px solid #f0f0f0",
-            }}
+            className={cn(
+              "flex items-center justify-between gap-2 rounded-md px-3 py-2.5",
+              "border border-[hsl(var(--border))] bg-[hsl(var(--card))]"
+            )}
           >
-            <span data-testid={`participant-name-${p.id}`} style={{ fontSize: 15 }}>
-              {p.display_name}
-              <span style={{ fontSize: 12, color: "#aaa", marginLeft: 6 }}>({p.role})</span>
+            <span data-testid={`participant-name-${p.id}`} className="flex flex-col sm:flex-row sm:items-center sm:gap-2 min-w-0">
+              <span className="font-medium text-sm truncate">{p.display_name}</span>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">({p.role})</span>
             </span>
             <span data-testid={`participant-vote-${p.id}`}>{badge}</span>
           </li>

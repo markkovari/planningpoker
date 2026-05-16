@@ -30,6 +30,7 @@ struct ConnContext {
 pub enum ClientMessage {
     CreateRoom {
         name: String,
+        deck_type: Option<pp_domain::room::DeckType>,
     },
     AddTicket {
         room_id: String,
@@ -54,6 +55,7 @@ pub enum ClientMessage {
         room_id: String,
         ticket_id: Option<String>,
         ticket_description: Option<String>,
+        countdown_secs: Option<u32>,
     },
     RevealVotes {
         room_id: String,
@@ -82,6 +84,11 @@ pub enum ServerMessage {
     },
     Error {
         message: String,
+    },
+    CountdownTick {
+        room_id: String,
+        session_id: String,
+        remaining_secs: u32,
     },
 }
 
@@ -191,12 +198,13 @@ async fn handle_client_message(
     use uuid::Uuid;
 
     match msg {
-        ClientMessage::CreateRoom { name } => {
+        ClientMessage::CreateRoom { name, deck_type } => {
             let room_id = Uuid::new_v4().to_string();
+            let resolved_deck = deck_type.unwrap_or(pp_domain::room::DeckType::Fibonacci);
             let event = DomainEvent::Room(RoomEvent::RoomCreated {
                 room_id: room_id.clone(),
                 name: name.clone(),
-                deck_type: pp_domain::room::DeckType::Fibonacci,
+                deck_type: resolved_deck,
                 facilitator_id: String::new(),
                 created_at: OffsetDateTime::now_utc(),
             });
@@ -258,6 +266,7 @@ async fn handle_client_message(
             room_id,
             ticket_id,
             ticket_description,
+            countdown_secs,
         } => {
             let session_id = Uuid::new_v4().to_string();
             let event = DomainEvent::Session(SessionEvent::SessionStarted {
@@ -271,6 +280,42 @@ async fn handle_client_message(
             let envelope = state.store.publish(&subject, event).await?;
             state.projection.apply(&envelope.payload);
             broadcast_room_state(&room_id, state).await;
+
+            // Spawn countdown task if requested.
+            if let Some(secs) = countdown_secs {
+                if secs > 0 && secs <= 300 {
+                    let state2 = state.clone();
+                    let rid = room_id.clone();
+                    let sid = session_id.clone();
+                    tokio::spawn(async move {
+                        for remaining in (0..=secs).rev() {
+                            let tick = ServerMessage::CountdownTick {
+                                room_id: rid.clone(),
+                                session_id: sid.clone(),
+                                remaining_secs: remaining,
+                            };
+                            let Ok(text) = serde_json::to_string(&tick) else { break };
+                            if let Some(tx) = state2.room_bus.get(&rid) {
+                                let _ = tx.send(text);
+                            }
+                            if remaining == 0 { break; }
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        }
+                        // Auto-reveal when countdown hits 0.
+                        let reveal_event = DomainEvent::Session(SessionEvent::SessionEnded {
+                            session_id: sid.clone(),
+                            room_id: rid.clone(),
+                            final_estimate: None,
+                            revealed_at: OffsetDateTime::now_utc(),
+                        });
+                        let subject = Subjects::session_ended(&rid, &sid);
+                        if let Ok(env) = state2.store.publish(&subject, reveal_event).await {
+                            state2.projection.apply(&env.payload);
+                            broadcast_room_state(&rid, &state2).await;
+                        }
+                    });
+                }
+            }
         }
 
         ClientMessage::CastVote {

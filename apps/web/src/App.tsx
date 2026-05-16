@@ -1,23 +1,131 @@
-import { CardPicker, ParticipantList, SessionHeader, TicketQueue, VoteReveal } from "@planning-poker/ui";
-import React, { useEffect, useState } from "react";
+import type { DeckType } from "@planning-poker/api-types";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CardPicker,
+  Input,
+  Label,
+  ParticipantList,
+  Separator,
+  SessionHeader,
+  TicketQueue,
+  VoteReveal,
+  cn,
+} from "@planning-poker/ui";
+import { Check, Link, Monitor, Moon, Sun, Timer, Users, Wifi, WifiOff } from "lucide-react";
+import { useTheme } from "next-themes";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { usePokerSocket } from "./usePokerSocket";
 
-const WS_URL = "ws://localhost:8080/ws";
+const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 
 const FIBONACCI_CARDS = ["0", "1", "2", "3", "5", "8", "13", "21", "34", "55", "89", "?", "☕"];
+const TSHIRT_CARDS = ["XS", "S", "M", "L", "XL", "XXL", "?", "☕"];
+
+type Theme = "system" | "light" | "dark";
+const THEME_CYCLE: Theme[] = ["system", "light", "dark"];
+const THEME_ICONS: Record<Theme, React.ReactNode> = {
+  system: <Monitor className="h-4 w-4" />,
+  light:  <Sun className="h-4 w-4" />,
+  dark:   <Moon className="h-4 w-4" />,
+};
+const THEME_LABELS: Record<Theme, string> = {
+  system: "System",
+  light:  "Light",
+  dark:   "Dark",
+};
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const current = (THEME_CYCLE.includes(theme as Theme) ? theme : "system") as Theme;
+  const next = THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length];
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => setTheme(next)}
+      aria-label={`Theme: ${THEME_LABELS[current]}`}
+    >
+      {THEME_ICONS[current]}
+    </Button>
+  );
+}
+
+function useCopyToClipboard(timeoutMs = 2000) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), timeoutMs);
+    });
+  }, [timeoutMs]);
+  return { copied, copy };
+}
+
+function inviteUrl(roomId: string) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("room", roomId);
+  return url.toString();
+}
+
+function PageShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[hsl(var(--background))] flex flex-col">
+      {children}
+    </div>
+  );
+}
 
 export function App() {
-  const { room, connected, error, createdRoomId, send } = usePokerSocket(WS_URL);
+  const { room, connected, error, createdRoomId, countdown, send } = usePokerSocket(WS_URL);
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
-  const [roomId, setRoomId] = useState("");
+  const [roomId, setRoomId] = useState(() => new URLSearchParams(window.location.search).get("room") ?? "");
   const [joined, setJoined] = useState(false);
+  const [roomName, setRoomName] = useState("");
+  const [deckType, setDeckType] = useState<DeckType>("Fibonacci");
+  const [countdownSecs, setCountdownSecs] = useState<number>(0);
+  const participantId = useRef(crypto.randomUUID());
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const { copied: linkCopied, copy: copyLink } = useCopyToClipboard();
 
   useEffect(() => {
-    if (createdRoomId) setRoomId(createdRoomId);
-  }, [createdRoomId]);
+    if (!createdRoomId) return;
+    setRoomId(createdRoomId);
+    if (displayName.trim()) {
+      // Name already filled — auto-join immediately
+      send({
+        type: "JoinRoom",
+        room_id: createdRoomId,
+        participant_id: participantId.current,
+        display_name: displayName.trim(),
+      });
+      setJoined(true);
+    } else {
+      // Focus name field so user can type name and hit Enter/Join
+      setTimeout(() => nameInputRef.current?.focus(), 50);
+    }
+  }, [createdRoomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const participantId = React.useRef(crypto.randomUUID());
+  // Keep ?room= in URL so sharing/refreshing works
+  useEffect(() => {
+    if (!roomId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("room", roomId);
+    window.history.replaceState(null, "", url.toString());
+  }, [roomId]);
+
+  const createRoom = () => {
+    const name = roomName.trim();
+    if (!name) return;
+    send({ type: "CreateRoom", name, deck_type: deckType });
+  };
 
   const join = () => {
     if (!roomId || !displayName) return;
@@ -31,153 +139,338 @@ export function App() {
   };
 
   const startSession = () => {
-    if (!room) return;
-    send({ type: "StartSession", room_id: room.id });
+    if (room) send({ type: "StartSession", room_id: room.id, countdown_secs: countdownSecs > 0 ? countdownSecs : undefined });
   };
-
-  const castVote = (card: string) => {
-    if (!room?.active_session) return;
-    setSelectedCard(card);
-    send({
-      type: "CastVote",
-      room_id: room.id,
-      session_id: room.active_session.id,
-      card,
-    });
-  };
-
-  const reveal = () => {
-    if (!room?.active_session) return;
-    send({ type: "RevealVotes", room_id: room.id, session_id: room.active_session.id });
-  };
-
+  const reveal = () => { if (room?.active_session) send({ type: "RevealVotes", room_id: room.id, session_id: room.active_session.id }); };
   const reset = () => {
     if (!room?.active_session) return;
     setSelectedCard(null);
     send({ type: "ResetSession", room_id: room.id, session_id: room.active_session.id });
   };
-
-  const addTicket = (title: string, description?: string) => {
-    if (!room) return;
-    send({ type: "AddTicket", room_id: room.id, title, description });
+  const castVote = (card: string) => {
+    if (!room?.active_session) return;
+    if (selectedCard === card) {
+      // Deselect: retract vote
+      setSelectedCard(null);
+      send({ type: "RetractVote", room_id: room.id, session_id: room.active_session.id });
+    } else {
+      setSelectedCard(card);
+      send({ type: "CastVote", room_id: room.id, session_id: room.active_session.id, card });
+    }
   };
+  const addTicket = (title: string, description?: string) => {
+    if (room) send({ type: "AddTicket", room_id: room.id, title, description });
+  };
+
+  const cards = room?.deck_type === "TShirt" ? TSHIRT_CARDS : FIBONACCI_CARDS;
 
   if (!joined) {
     return (
-      <div data-testid="join-form" style={{ padding: 32, maxWidth: 400, margin: "0 auto" }}>
-        <h1>Planning Poker</h1>
-
-        <details style={{ marginBottom: 16 }}>
-          <summary style={{ cursor: "pointer", fontSize: 14, color: "#555" }}>Create a new room</summary>
-          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-            <input
-              data-testid="room-name-input"
-              placeholder="Room name"
-              id="room-name"
-              style={{ padding: 8, fontSize: 16, flex: 1 }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  const name = (e.target as HTMLInputElement).value.trim();
-                  if (name) send({ type: "CreateRoom", name });
-                }
-              }}
-            />
-            <button
-              data-testid="create-room-btn"
-              style={{ padding: "8px 12px", fontSize: 14 }}
-              onClick={() => {
-                const input = document.getElementById("room-name") as HTMLInputElement;
-                const name = input?.value.trim();
-                if (name) send({ type: "CreateRoom", name });
-              }}
-            >
-              Create
-            </button>
+      <PageShell>
+        <header className="border-b border-[hsl(var(--border))] px-4 h-14 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-[hsl(var(--primary))] shrink-0" />
+            <span className="font-semibold text-base sm:text-lg">Planning Poker</span>
           </div>
-          {createdRoomId && (
-            <p style={{ fontSize: 13, color: "#080", marginTop: 4 }}>
-              Room created! ID copied to field below.
-            </p>
-          )}
-        </details>
+          <div className="flex items-center gap-2">
+            <span
+              data-testid="connection-status"
+              className={cn("flex items-center gap-1 text-xs font-medium", connected ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}
+            >
+              {connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+              <span className="hidden sm:inline">{connected ? "Connected" : "Disconnected"}</span>
+            </span>
+            <ThemeToggle />
+          </div>
+        </header>
 
-        <form
-          onSubmit={(e) => { e.preventDefault(); join(); }}
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <input
-            data-testid="room-id-input"
-            placeholder="Room ID"
-            value={roomId}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRoomId(e.target.value)}
-            style={{ padding: 8, fontSize: 16 }}
-          />
-          <input
-            data-testid="name-input"
-            placeholder="Your name"
-            value={displayName}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDisplayName(e.target.value)}
-            style={{ padding: 8, fontSize: 16 }}
-          />
-          <button data-testid="join-btn" type="submit" style={{ padding: 10, fontSize: 16 }}>
-            Join Room
-          </button>
-        </form>
-        <p data-testid="connection-status" style={{ color: connected ? "green" : "red" }}>
-          {connected ? "Connected" : "Disconnected"}
-        </p>
-      </div>
+        <main className="flex-1 flex items-start sm:items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <div className="w-full max-w-md space-y-6 py-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Create a new room</CardTitle>
+                <CardDescription>Set up a new planning poker session</CardDescription>
+              </CardHeader>
+              <CardContent>
+              <form onSubmit={(e) => { e.preventDefault(); createRoom(); }} className="space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="room-name">Room name</Label>
+                  <Input
+                    id="room-name"
+                    data-testid="room-name-input"
+                    placeholder="Sprint 42 Planning"
+                    required
+                    minLength={2}
+                    value={roomName}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRoomName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Deck type</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["Fibonacci", "TShirt"] as DeckType[]).map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setDeckType(d)}
+                        className={cn(
+                          "rounded-md border px-3 py-2.5 text-sm font-medium transition-colors",
+                          deckType === d
+                            ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]"
+                            : "border-[hsl(var(--border))] hover:bg-[hsl(var(--accent))] active:bg-[hsl(var(--accent))]"
+                        )}
+                      >
+                        {d === "Fibonacci" ? "Fibonacci" : "T-Shirt"}
+                        <span className="block text-xs font-normal text-[hsl(var(--muted-foreground))]">
+                          {d === "Fibonacci" ? "1, 2, 3, 5, 8…" : "XS, S, M, L…"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    <Timer className="h-3.5 w-3.5" />
+                    Countdown timer
+                  </Label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[0, 30, 60, 90].map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setCountdownSecs(s)}
+                        className={cn(
+                          "rounded-md border py-2 text-sm font-medium transition-colors",
+                          countdownSecs === s
+                            ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]"
+                            : "border-[hsl(var(--border))] hover:bg-[hsl(var(--accent))]"
+                        )}
+                      >
+                        {s === 0 ? "Off" : `${s}s`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <Button
+                  data-testid="create-room-btn"
+                  type="submit"
+                  className="w-full"
+                  disabled={!roomName.trim()}
+                >
+                  Create Room
+                </Button>
+              </form>
+                {createdRoomId && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 text-center">
+                      Room created! ID copied to field below.
+                    </p>
+                    <Button
+                      data-testid="copy-invite-btn"
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-1.5"
+                      onClick={() => copyLink(inviteUrl(createdRoomId))}
+                    >
+                      {linkCopied ? <Check className="h-3 w-3" /> : <Link className="h-3 w-3" />}
+                      {linkCopied ? "Link copied!" : "Copy invite link"}
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="flex items-center gap-3">
+              <Separator className="flex-1" />
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">or join existing</span>
+              <Separator className="flex-1" />
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Join a room</CardTitle>
+                <CardDescription>Enter a room ID to join the session</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form
+                  onSubmit={(e) => { e.preventDefault(); join(); }}
+                  className="space-y-3"
+                >
+                  <div className="space-y-2">
+                    <Label htmlFor="room-id">Room ID</Label>
+                    <Input
+                      id="room-id"
+                      data-testid="room-id-input"
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      value={roomId}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRoomId(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="display-name">Your name</Label>
+                    <Input
+                      id="display-name"
+                      data-testid="name-input"
+                      ref={nameInputRef}
+                      placeholder="Alice"
+                      value={displayName}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDisplayName(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    data-testid="join-btn"
+                    type="submit"
+                    className="w-full"
+                    disabled={!roomId.trim() || !displayName.trim()}
+                  >
+                    Join Room
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        </main>
+      </PageShell>
     );
   }
 
   return (
-    <div data-testid="room-view" style={{ padding: 32, maxWidth: 800, margin: "0 auto" }}>
-      <h1 data-testid="room-heading">Room: {room?.name ?? roomId}</h1>
-      {!connected && (
-        <p style={{ color: "orange", fontWeight: "bold" }}>Reconnecting…</p>
-      )}
-      {error && connected && <p data-testid="error-msg" style={{ color: "red" }}>{error}</p>}
-
-      {room && !room.active_session && (
-        <button data-testid="start-session-btn" onClick={startSession} style={{ padding: "8px 16px", marginBottom: 16 }}>
-          Start Session
-        </button>
-      )}
-
-      <SessionHeader
-        session={room?.active_session ?? null}
-        onReveal={reveal}
-        onReset={reset}
-      />
-
-      {room && (
-        <ParticipantList
-          participants={room.participants}
-          votes={room.active_session?.votes ?? []}
-          revealed={room.active_session?.revealed ?? false}
-        />
-      )}
-
-      {room && !room.active_session && (
-        <TicketQueue tickets={room.ticket_queue} onAdd={addTicket} />
-      )}
-
-      {room?.active_session && !room.active_session.revealed && (
-        <div data-testid="card-picker" style={{ marginTop: 24 }}>
-          <h3>Your vote</h3>
-          <CardPicker
-            cards={FIBONACCI_CARDS}
-            selected={selectedCard}
-            onSelect={castVote}
-          />
+    <PageShell>
+      <header className="border-b border-[hsl(var(--border))] px-3 sm:px-4 h-14 flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <Users className="h-5 w-5 text-[hsl(var(--primary))] shrink-0" />
+          <h1
+            data-testid="room-heading"
+            className="font-semibold text-base sm:text-lg truncate"
+            style={{ maxWidth: "min(60vw, 20rem)" }}
+          >
+            {room?.name ?? roomId}
+          </h1>
+          {room && (
+            <Badge variant="secondary" className="text-xs shrink-0 hidden sm:inline-flex">
+              {room.deck_type}
+            </Badge>
+          )}
         </div>
-      )}
-
-      {room?.active_session?.revealed && (
-        <div data-testid="vote-reveal" style={{ marginTop: 24 }}>
-          <VoteReveal votes={room.active_session.votes} />
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {!connected && (
+            <span className="flex items-center gap-1 text-xs text-amber-500 font-medium">
+              <WifiOff className="h-3 w-3" />
+              <span className="hidden sm:inline">Reconnecting…</span>
+            </span>
+          )}
+          {error && connected && (
+            <span data-testid="error-msg" className="text-xs text-red-500 hidden sm:inline">{error}</span>
+          )}
+          <Button
+            data-testid="invite-btn"
+            variant="outline"
+            size="sm"
+            onClick={() => copyLink(inviteUrl(room?.id ?? roomId))}
+            className="gap-1.5 text-xs h-8 px-2 sm:px-3"
+          >
+            {linkCopied ? <Check className="h-3 w-3" /> : <Link className="h-3 w-3" />}
+            <span className="hidden sm:inline">{linkCopied ? "Copied!" : "Invite"}</span>
+          </Button>
+          <ThemeToggle />
         </div>
-      )}
-    </div>
+      </header>
+
+      <main className="flex-1 p-4 sm:p-6 max-w-5xl mx-auto w-full overflow-y-auto">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          {/* Left / main column */}
+          <div className="md:col-span-2 space-y-6">
+            <Card>
+              <CardContent className="pt-6 space-y-5">
+                {room && !room.active_session && (
+                  <Button data-testid="start-session-btn" onClick={startSession} className="w-full">
+                    Start Session
+                  </Button>
+                )}
+                <SessionHeader session={room?.active_session ?? null} onReveal={reveal} onReset={reset} />
+              </CardContent>
+            </Card>
+
+            {countdown !== null && room?.active_session && !room.active_session.revealed && (
+              <div className="flex items-center justify-center gap-3 py-2">
+                <Timer className="h-5 w-5 text-[hsl(var(--primary))]" />
+                <span
+                  className={cn(
+                    "text-4xl font-bold tabular-nums transition-colors",
+                    countdown <= 5 ? "text-red-500" : "text-[hsl(var(--primary))]"
+                  )}
+                >
+                  {countdown}
+                </span>
+                <span className="text-sm text-[hsl(var(--muted-foreground))]">seconds left</span>
+              </div>
+            )}
+
+            {room?.active_session && !room.active_session.revealed && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Your vote</CardTitle>
+                </CardHeader>
+                <CardContent className="pb-6" data-testid="card-picker">
+                  <CardPicker cards={cards} selected={selectedCard} onSelect={castVote} />
+                </CardContent>
+              </Card>
+            )}
+
+            {room?.active_session?.revealed && (
+              <Card data-testid="vote-reveal">
+                <CardContent className="pt-6">
+                  <VoteReveal
+                    votes={room.active_session.votes}
+                    onStartNew={startSession}
+                    onReset={reset}
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Right / sidebar column */}
+          <div className="space-y-4">
+            {room && room.participants.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Participants
+                    <Badge variant="secondary">{room.participants.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ParticipantList
+                    participants={room.participants}
+                    votes={room.active_session?.votes ?? []}
+                    revealed={room.active_session?.revealed ?? false}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
+            {room && (
+              <Card>
+                <CardContent className="pt-6">
+                  <TicketQueue
+                    tickets={room.ticket_queue}
+                    onAdd={addTicket}
+                    activeTicketId={room.active_session?.ticket_id ?? undefined}
+                    activeTicketTitle={
+                      room.active_session?.ticket_id
+                        ? (room.ticket_queue.find((t) => t.id === room.active_session!.ticket_id)?.title
+                            ?? room.active_session.ticket_id)
+                        : undefined
+                    }
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </main>
+    </PageShell>
   );
 }

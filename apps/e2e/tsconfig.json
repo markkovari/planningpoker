@@ -5,7 +5,8 @@
     "moduleResolution": "Node",
     "strict": true,
     "esModuleInterop": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": ["node"]
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "playwright-report", "test-results"]
