@@ -1,0 +1,29 @@
+{
+  "name": "@planning-poker/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint src",
+    "type-check": "tsc --noEmit",
+    "preview": "vite preview",
+    "oxlint": "oxlint --config ../../.oxlintrc.json src/"
+  },
+  "dependencies": {
+    "@planning-poker/api-types": "workspace:*",
+    "@planning-poker/ui": "workspace:*",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@planning-poker/config-eslint": "workspace:*",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "oxlint": "^0.16",
+    "typescript": "^5",
+    "vite": "^6"
+  }
+}

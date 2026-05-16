@@ -1,0 +1,16 @@
+[package]
+name = "pp-store"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pp-events    = { workspace = true }
+async-nats   = { workspace = true }
+tokio        = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+async-trait  = "0.1"
+uuid         = { workspace = true }
+time         = { workspace = true }
+futures-util = "0.3"

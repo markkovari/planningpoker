@@ -1,0 +1,24 @@
+{
+  "name": "planningpoker",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "type-check": "turbo run type-check",
+    "cargo:build": "cargo build --workspace",
+    "cargo:check": "cargo check --workspace",
+    "cargo:test": "cargo test --workspace",
+    "cargo:clippy": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+    "cargo:fmt": "cargo fmt --all",
+    "e2e": "pnpm --filter @planning-poker/e2e test",
+    "oxlint": "oxlint --config .oxlintrc.json apps/",
+    "oxlint:fix": "oxlint --config .oxlintrc.json --fix apps/"
+  },
+  "devDependencies": {
+    "oxlint": "^0.16",
+    "turbo": "^2"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

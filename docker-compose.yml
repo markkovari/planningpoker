@@ -1,0 +1,26 @@
+services:
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"  # client
+      - "8222:8222"  # monitoring HTTP
+    volumes:
+      - nats-data:/data
+
+  gateway:
+    build:
+      context: .
+      dockerfile: crates/pp-gateway/Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      - nats
+    profiles:
+      - full
+
+volumes:
+  nats-data:

@@ -1,0 +1,9 @@
+/target
+node_modules
+.turbo
+apps/*/dist
+apps/packages/*/dist
+apps/e2e/playwright-report
+apps/e2e/test-results
+
+**ruvector**

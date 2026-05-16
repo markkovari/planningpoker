@@ -1,0 +1,30 @@
+[package]
+name = "pp-gateway"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pp-gateway"
+path = "src/main.rs"
+
+[dependencies]
+pp-projection = { workspace = true }
+pp-store      = { workspace = true }
+pp-events     = { workspace = true }
+pp-domain     = { workspace = true, features = ["serde"] }
+axum          = { workspace = true }
+tower         = { workspace = true }
+tower-http    = { workspace = true }
+tokio         = { workspace = true }
+async-nats    = { workspace = true }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+uuid          = { workspace = true }
+time          = { workspace = true }
+tracing             = { workspace = true }
+tracing-subscriber  = { workspace = true }
+futures-util        = "0.3"
+anyhow              = "1"
+dashmap             = { workspace = true }
+tower_governor      = { version = "0.8", features = ["axum"] }
+governor            = "0.8"

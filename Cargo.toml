@@ -1,0 +1,32 @@
+[workspace]
+members = [
+    "crates/pp-domain",
+    "crates/pp-events",
+    "crates/pp-store",
+    "crates/pp-projection",
+    "crates/pp-gateway",
+    "crates/pp-cli",
+]
+resolver = "2"
+
+[workspace.dependencies]
+pp-domain     = { path = "crates/pp-domain" }
+pp-events     = { path = "crates/pp-events" }
+pp-store      = { path = "crates/pp-store" }
+pp-projection = { path = "crates/pp-projection" }
+
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+tokio       = { version = "1", features = ["full"] }
+async-nats  = "0.38"
+uuid        = { version = "1", features = ["v4", "serde"] }
+time        = { version = "0.3", features = ["serde"] }
+thiserror   = "2"
+axum        = { version = "0.8", features = ["ws"] }
+tower       = "0.5"
+tower-http  = { version = "0.6", features = ["cors", "trace"] }
+tracing             = "0.1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+clap        = { version = "4", features = ["derive", "env"] }
+dashmap     = "6"
+async-trait = "0.1"

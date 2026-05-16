@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "react-hooks", "typescript", "unicorn", "import"],
+  "rules": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "warn",
+    "style": "warn",
+    "restriction": "off",
+
+    "no-unused-vars": "error",
+    "no-console": "warn",
+    "eqeqeq": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+
+    "react/jsx-key": "error",
+    "react/no-direct-mutation-state": "error",
+    "react/self-closing-comp": "warn",
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn",
+
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "warn",
+    "typescript/consistent-type-imports": "warn",
+
+    "unicorn/prefer-node-protocol": "off",
+    "unicorn/no-array-for-each": "warn",
+    "unicorn/prefer-string-slice": "warn",
+
+    "import/no-duplicates": "error"
+  },
+  "env": {
+    "browser": true,
+    "es2022": true
+  },
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/.turbo/**"]
+}
