@@ -39,11 +39,7 @@ pub async fn fetch_unestimated(
         .issues
         .into_iter()
         .map(|issue| {
-            let desc = issue
-                .fields
-                .description
-                .as_ref()
-                .and_then(|d| d.as_text());
+            let desc = issue.fields.description.as_ref().and_then(|d| d.as_text());
             (issue.key, issue.fields.summary, desc)
         })
         .collect();

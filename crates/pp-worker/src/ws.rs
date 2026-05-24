@@ -64,7 +64,7 @@ pub enum ServerMessage {
         name: String,
     },
     RoomState {
-        room: RoomView,
+        room: Box<RoomView>,
     },
     Error {
         message: String,
@@ -87,11 +87,15 @@ pub enum ServerMessage {
 
 impl ServerMessage {
     pub fn error(msg: impl Into<String>) -> Self {
-        Self::Error { message: msg.into() }
+        Self::Error {
+            message: msg.into(),
+        }
     }
 
     pub fn room_state(room: RoomView) -> Self {
-        Self::RoomState { room }
+        Self::RoomState {
+            room: Box::new(room),
+        }
     }
 }
 

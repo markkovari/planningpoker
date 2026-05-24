@@ -18,7 +18,7 @@ new_classes = ["RoomObject"]
 binding = "DB"
 database_name = "planning-poker"
 # Fill in after: wrangler d1 create planning-poker
-database_id = ""
+database_id = "fd171c46-5316-4da6-bed2-0cfdbba1d247"
 
 [vars]
 JIRA_CUSTOM_FIELD = "customfield_10016"

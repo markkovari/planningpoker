@@ -1,7 +1,7 @@
 pub mod config;
 pub mod models;
 
-pub use config::JiraConfig;
+pub use config::{JiraConfig, JiraCredentials, JiraRoomConfig};
 pub use models::{CachedJiraTicket, JiraIssue, JiraSearchResult, StoryPointsUpdate};
 
 /// Build the JQL query for fetching unestimated stories.

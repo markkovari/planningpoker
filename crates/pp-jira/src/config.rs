@@ -1,24 +1,56 @@
 use serde::{Deserialize, Serialize};
 
+/// Sensitive per-room Jira credentials stored separately from non-sensitive config.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct JiraCredentials {
+    pub email: String,
+    pub api_token: String,
+}
+
+impl std::fmt::Debug for JiraCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JiraCredentials")
+            .field("email", &self.email)
+            .field("api_token", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Non-sensitive room Jira configuration — safe to log and serialize freely.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JiraConfig {
+pub struct JiraRoomConfig {
     /// e.g. "https://myteam.atlassian.net"
     pub base_url: String,
     /// e.g. "PROJ"
     pub project_key: String,
-    /// Jira account email
-    pub email: String,
-    /// Jira API token (generated at id.atlassian.com/manage-profile/security/api-tokens)
-    pub api_token: String,
     /// Story points custom field, typically "customfield_10016" for Jira Next-gen
     pub story_points_field: String,
 }
 
+/// Combined view used only within request handlers — never serialized to storage.
+#[derive(Clone, Debug)]
+pub struct JiraConfig {
+    pub base_url: String,
+    pub project_key: String,
+    pub email: String,
+    pub api_token: String,
+    pub story_points_field: String,
+}
+
 impl JiraConfig {
+    pub fn from_parts(config: JiraRoomConfig, creds: JiraCredentials) -> Self {
+        Self {
+            base_url: config.base_url,
+            project_key: config.project_key,
+            story_points_field: config.story_points_field,
+            email: creds.email,
+            api_token: creds.api_token,
+        }
+    }
+
     pub fn basic_auth_header(&self) -> String {
         use std::fmt::Write;
         let raw = format!("{}:{}", self.email, self.api_token);
-        // base64 encode using only std — avoids pulling in a dep for WASM compat
         let mut encoded = String::new();
         let bytes = raw.as_bytes();
         let alphabet =

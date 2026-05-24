@@ -1,5 +1,4 @@
 use pp_events::{DomainEvent, EventEnvelope};
-use serde_json;
 use worker::{D1Database, Result};
 
 pub struct DoEventStore<'a> {
@@ -36,8 +35,8 @@ impl<'a> DoEventStore<'a> {
         event: &DomainEvent,
         occurred_at: u64,
     ) -> Result<()> {
-        let payload = serde_json::to_string(event)
-            .map_err(|e| worker::Error::RustError(e.to_string()))?;
+        let payload =
+            serde_json::to_string(event).map_err(|e| worker::Error::RustError(e.to_string()))?;
         self.db
             .prepare(
                 "INSERT INTO events (event_id, room_id, subject, payload, occurred_at)

@@ -3,7 +3,7 @@ use crate::jira_handler;
 use crate::ws::{ClientMessage, ConnTag, ServerMessage};
 use pp_domain::participant::Role;
 use pp_events::{DomainEvent, RoomEvent, SessionEvent, VoteEvent};
-use pp_jira::{config::JiraConfig, estimate_to_points};
+use pp_jira::{config::JiraConfig, JiraCredentials, JiraRoomConfig, estimate_to_points};
 use pp_projection::{apply_event, RoomView};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -103,7 +103,7 @@ impl DurableObject for RoomObject {
             Ok(m) => m,
             Err(e) => {
                 let _ = ws.send_with_str(
-                    &serde_json::to_string(&ServerMessage::error(format!("invalid message: {e}")))
+                    serde_json::to_string(&ServerMessage::error(format!("invalid message: {e}")))
                         .unwrap_or_default(),
                 );
                 return Ok(());
@@ -112,8 +112,7 @@ impl DurableObject for RoomObject {
 
         if let Err(e) = self.handle_message(ws.clone(), msg).await {
             let _ = ws.send_with_str(
-                &serde_json::to_string(&ServerMessage::error(e.to_string()))
-                    .unwrap_or_default(),
+                serde_json::to_string(&ServerMessage::error(e.to_string())).unwrap_or_default(),
             );
         }
         Ok(())
@@ -201,15 +200,10 @@ impl RoomObject {
                 self.persist_and_apply_for_room(&room_id, "pp.room.created", &event)
                     .await?;
 
-                let _ = self
-                    .register_room_in_d1(&room_id, &name, resolved)
-                    .await;
+                let _ = self.register_room_in_d1(&room_id, &name, resolved).await;
 
-                let reply = ServerMessage::RoomCreated {
-                    room_id,
-                    name,
-                };
-                let _ = ws.send_with_str(&serde_json::to_string(&reply).unwrap_or_default());
+                let reply = ServerMessage::RoomCreated { room_id, name };
+                let _ = ws.send_with_str(serde_json::to_string(&reply).unwrap_or_default());
                 self.broadcast_room_state();
             }
 
@@ -322,11 +316,8 @@ impl RoomObject {
                     card: parsed,
                     cast_at: now_millis(),
                 });
-                self.persist_and_apply(
-                    &format!("pp.vote.{}.{}.cast", room_id, session_id),
-                    &event,
-                )
-                .await?;
+                self.persist_and_apply(&format!("pp.vote.{}.{}.cast", room_id, session_id), &event)
+                    .await?;
                 self.broadcast_room_state();
             }
 
@@ -389,18 +380,22 @@ impl RoomObject {
                     .map(|v| v.to_string())
                     .unwrap_or_else(|_| "customfield_10016".to_string());
 
-                let config = JiraConfig {
+                let room_config = JiraRoomConfig {
                     base_url: jira_base_url.clone(),
                     project_key: jira_project_key.clone(),
-                    email: jira_email,
-                    api_token: jira_api_token,
                     story_points_field,
                 };
+                let creds = JiraCredentials {
+                    email: jira_email,
+                    api_token: jira_api_token,
+                };
+                let config = JiraConfig::from_parts(room_config.clone(), creds.clone());
 
                 let _ = self
                     .update_room_jira_config(&room_id, &jira_base_url, &jira_project_key)
                     .await;
-                let _ = self.state.storage().put("jira_config", &config).await;
+                let _ = self.state.storage().put("jira_room_config", &room_config).await;
+                let _ = self.state.storage().put("jira_credentials", &creds).await;
 
                 match jira_handler::fetch_unestimated(&config).await {
                     Ok(tickets) => {
@@ -426,8 +421,7 @@ impl RoomObject {
                             project_key: jira_project_key,
                             ticket_count: count,
                         };
-                        let _ = ws
-                            .send_with_str(&serde_json::to_string(&reply).unwrap_or_default());
+                        let _ = ws.send_with_str(serde_json::to_string(&reply).unwrap_or_default());
                     }
                     Err(e) => {
                         return Err(Error::RustError(format!("Jira fetch failed: {e}")));
@@ -436,9 +430,12 @@ impl RoomObject {
             }
 
             ClientMessage::ImportJiraTickets { room_id } => {
-                let config: Option<JiraConfig> =
-                    self.state.storage().get("jira_config").await.ok();
-                let Some(config) = config else {
+                let room_cfg: Option<JiraRoomConfig> =
+                    self.state.storage().get("jira_room_config").await.ok();
+                let creds: Option<JiraCredentials> =
+                    self.state.storage().get("jira_credentials").await.ok();
+                let Some(config) = room_cfg.zip(creds).map(|(c, k)| JiraConfig::from_parts(c, k))
+                else {
                     return Err(Error::RustError(
                         "no Jira project linked to this room".to_string(),
                     ));
@@ -467,8 +464,7 @@ impl RoomObject {
                             project_key: config.project_key,
                             ticket_count: count,
                         };
-                        let _ = ws
-                            .send_with_str(&serde_json::to_string(&reply).unwrap_or_default());
+                        let _ = ws.send_with_str(serde_json::to_string(&reply).unwrap_or_default());
                     }
                     Err(e) => {
                         return Err(Error::RustError(format!("Jira fetch failed: {e}")));
@@ -508,13 +504,17 @@ impl RoomObject {
 
         if let (Some(issue_key), Some(est)) = (jira_issue_key, final_est) {
             if let Some(points) = estimate_to_points(&est) {
-                let config: Option<JiraConfig> =
-                    self.state.storage().get("jira_config").await.ok();
+                let config = {
+                    let room_cfg: Option<JiraRoomConfig> =
+                        self.state.storage().get("jira_room_config").await.ok();
+                    let creds: Option<JiraCredentials> =
+                        self.state.storage().get("jira_credentials").await.ok();
+                    room_cfg.zip(creds).map(|(c, k)| JiraConfig::from_parts(c, k))
+                };
                 if let Some(config) = config {
-                    let push_ok =
-                        jira_handler::push_story_points(&config, &issue_key, points)
-                            .await
-                            .is_ok();
+                    let push_ok = jira_handler::push_story_points(&config, &issue_key, points)
+                        .await
+                        .is_ok();
                     let status = if push_ok { "pushed" } else { "failed" };
 
                     if let Some(session) = self.room_view.active_session.as_mut() {
@@ -544,7 +544,8 @@ impl RoomObject {
 
     async fn persist_and_apply(&mut self, subject: &str, event: &DomainEvent) -> Result<()> {
         let room_id = self.room_view.id.clone();
-        self.persist_and_apply_for_room(&room_id, subject, event).await
+        self.persist_and_apply_for_room(&room_id, subject, event)
+            .await
     }
 
     async fn persist_and_apply_for_room(
@@ -620,12 +621,10 @@ impl RoomObject {
         jira_project_key: &str,
     ) -> Result<()> {
         let db = self.env.d1("DB")?;
-        db.prepare(
-            "UPDATE rooms SET jira_base_url = ?1, jira_project_key = ?2 WHERE room_id = ?3",
-        )
-        .bind(&[jsv(jira_base_url), jsv(jira_project_key), jsv(room_id)])?
-        .run()
-        .await?;
+        db.prepare("UPDATE rooms SET jira_base_url = ?1, jira_project_key = ?2 WHERE room_id = ?3")
+            .bind(&[jsv(jira_base_url), jsv(jira_project_key), jsv(room_id)])?
+            .run()
+            .await?;
         Ok(())
     }
 

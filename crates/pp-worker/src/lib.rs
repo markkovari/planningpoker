@@ -95,11 +95,11 @@ async fn create_room(mut req: Request, env: Env) -> Result<Response> {
         jsv(&deck_type),
         body.jira_project_key
             .as_deref()
-            .map(|s| jsv(s))
+            .map(jsv)
             .unwrap_or_else(jsnull),
         body.jira_base_url
             .as_deref()
-            .map(|s| jsv(s))
+            .map(jsv)
             .unwrap_or_else(jsnull),
         jsf(now),
         jsf(expires),
@@ -200,7 +200,7 @@ async fn run_jira_sync(env: Env) -> Result<()> {
                             jsv(&issue_key),
                             jsv(&project.jira_project_key),
                             jsv(&summary),
-                            description.as_deref().map(|s| jsv(s)).unwrap_or_else(jsnull),
+                            description.as_deref().map(jsv).unwrap_or_else(jsnull),
                             jsf(now),
                         ]);
                     if let Ok(stmt) = result {
@@ -209,10 +209,7 @@ async fn run_jira_sync(env: Env) -> Result<()> {
                 }
             }
             Err(e) => {
-                console_error!(
-                    "Jira sync failed for {}: {e}",
-                    project.jira_project_key
-                );
+                console_error!("Jira sync failed for {}: {e}", project.jira_project_key);
             }
         }
     }
@@ -221,6 +218,7 @@ async fn run_jira_sync(env: Env) -> Result<()> {
     #[derive(serde::Deserialize)]
     struct FailedSession {
         session_id: String,
+        #[allow(dead_code)]
         room_id: String,
         jira_issue_key: String,
         final_estimate: String,
@@ -251,10 +249,9 @@ async fn run_jira_sync(env: Env) -> Result<()> {
                 api_token: jira_token.clone(),
                 story_points_field: story_points_field.clone(),
             };
-            let push_ok =
-                jira_handler::push_story_points(&config, &session.jira_issue_key, points)
-                    .await
-                    .is_ok();
+            let push_ok = jira_handler::push_story_points(&config, &session.jira_issue_key, points)
+                .await
+                .is_ok();
             let new_status = if push_ok { "success" } else { "failed" };
             let result = db
                 .prepare(
