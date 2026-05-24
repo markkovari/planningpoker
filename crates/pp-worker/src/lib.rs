@@ -6,6 +6,7 @@ mod ws;
 pub use room_object::RoomObject;
 
 use pp_jira::{config::JiraConfig, models::CachedJiraTicket};
+use uuid::Uuid;
 use wasm_bindgen::JsValue;
 use worker::*;
 
@@ -61,7 +62,7 @@ async fn route_to_room_do(req: Request, env: Env) -> Result<Response> {
         .query_pairs()
         .find(|(k, _)| k == "room")
         .map(|(_, v)| v.into_owned())
-        .ok_or_else(|| Error::RustError("missing ?room= query param".to_string()))?;
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
 
     let namespace = env.durable_object("ROOM_OBJECT")?;
     let stub = namespace.id_from_name(&room_id)?.get_stub()?;
