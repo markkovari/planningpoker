@@ -84,10 +84,12 @@ function PageShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function loadLastSession(): { roomId: string; displayName: string } | null {
+interface SavedSession { roomId: string; displayName: string; participantId: string }
+
+function loadLastSession(): SavedSession | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as { roomId: string; displayName: string }) : null;
+    return raw ? (JSON.parse(raw) as SavedSession) : null;
   } catch {
     return null;
   }
@@ -102,13 +104,14 @@ export function App() {
   const [roomName, setRoomName] = useState("");
   const [deckType, setDeckType] = useState<DeckType>("Fibonacci");
   const [countdownSecs, setCountdownSecs] = useState<number>(0);
-  const participantId = useRef(crypto.randomUUID());
+  const lastSession = loadLastSession();
+  const participantId = useRef(lastSession?.participantId ?? crypto.randomUUID());
   const nameInputRef = useRef<HTMLInputElement>(null);
   const { copied: linkCopied, copy: copyLink } = useCopyToClipboard();
 
-  const lastSession = loadLastSession();
+  const urlRoomId = new URLSearchParams(window.location.search).get("room");
   const [showResumePrompt, setShowResumePrompt] = useState(
-    () => !!(lastSession && !new URLSearchParams(window.location.search).get("room"))
+    () => !!(lastSession && (lastSession.roomId === urlRoomId || !urlRoomId))
   );
 
   // Jira form state
@@ -147,7 +150,7 @@ export function App() {
   // Persist session for reconnect-on-refresh
   useEffect(() => {
     if (joined && roomId && displayName) {
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ roomId, displayName }));
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ roomId, displayName, participantId: participantId.current }));
     }
   }, [joined, roomId, displayName]);
 
