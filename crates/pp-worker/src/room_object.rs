@@ -3,9 +3,10 @@ use crate::jira_handler;
 use crate::ws::{ClientMessage, ConnTag, ServerMessage};
 use pp_domain::participant::Role;
 use pp_events::{DomainEvent, RoomEvent, SessionEvent, VoteEvent};
-use pp_jira::{config::JiraConfig, JiraCredentials, JiraRoomConfig, estimate_to_points};
+use pp_jira::{config::JiraConfig, estimate_to_points, JiraCredentials, JiraRoomConfig};
 use pp_projection::{apply_event, RoomView};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen::JsValue;
@@ -23,37 +24,48 @@ fn jsf(f: f64) -> JsValue {
     JsValue::from_f64(f)
 }
 
-#[durable_object]
-pub struct RoomObject {
-    state: State,
-    env: Env,
+struct Inner {
     room_view: RoomView,
     votes: HashMap<(String, String), String>,
     initialized: bool,
 }
 
+impl Inner {
+    fn apply(&mut self, event: &DomainEvent) {
+        apply_event(&mut self.room_view, &mut self.votes, event);
+    }
+}
+
 #[durable_object]
+pub struct RoomObject {
+    state: State,
+    env: Env,
+    inner: RefCell<Inner>,
+}
+
 impl DurableObject for RoomObject {
     fn new(state: State, env: Env) -> Self {
         Self {
             state,
             env,
-            room_view: RoomView::default(),
-            votes: HashMap::new(),
-            initialized: false,
+            inner: RefCell::new(Inner {
+                room_view: RoomView::default(),
+                votes: HashMap::new(),
+                initialized: false,
+            }),
         }
     }
 
-    async fn fetch(&mut self, req: Request) -> Result<Response> {
-        // All requests to the DO are WS upgrades
+    async fn fetch(&self, req: Request) -> Result<Response> {
         self.handle_ws_upgrade(req).await
     }
 
-    async fn alarm(&mut self) -> Result<Response> {
+    async fn alarm(&self) -> Result<Response> {
         let _ = self.ensure_initialized().await;
 
         let countdown_key = "countdown";
-        let state: Option<CountdownState> = self.state.storage().get(countdown_key).await.ok();
+        let state: Option<CountdownState> =
+            self.state.storage().get(countdown_key).await.ok().flatten();
 
         if let Some(mut cd) = state {
             if cd.remaining_secs == 0 {
@@ -64,7 +76,7 @@ impl DurableObject for RoomObject {
             cd.remaining_secs -= 1;
 
             let tick = ServerMessage::CountdownTick {
-                room_id: self.room_view.id.clone(),
+                room_id: self.inner.borrow().room_view.id.clone(),
                 session_id: cd.session_id.clone(),
                 remaining_secs: cd.remaining_secs,
             };
@@ -88,7 +100,7 @@ impl DurableObject for RoomObject {
     }
 
     async fn websocket_message(
-        &mut self,
+        &self,
         ws: WebSocket,
         message: WebSocketIncomingMessage,
     ) -> Result<()> {
@@ -119,7 +131,7 @@ impl DurableObject for RoomObject {
     }
 
     async fn websocket_close(
-        &mut self,
+        &self,
         _ws: WebSocket,
         _code: usize,
         _reason: String,
@@ -130,8 +142,7 @@ impl DurableObject for RoomObject {
 }
 
 impl RoomObject {
-    async fn handle_ws_upgrade(&mut self, req: Request) -> Result<Response> {
-        // Extract room_id from ?room= param and cache it
+    async fn handle_ws_upgrade(&self, req: Request) -> Result<Response> {
         let url = req.url()?;
         let room_id_param = url
             .query_pairs()
@@ -139,8 +150,7 @@ impl RoomObject {
             .map(|(_, v)| v.into_owned());
 
         if let Some(rid) = room_id_param {
-            if self.room_view.id.is_empty() {
-                // Store for use when creating room if not yet initialized
+            if self.inner.borrow().room_view.id.is_empty() {
                 let _ = self.state.storage().put("pending_room_id", &rid).await;
             }
         }
@@ -152,21 +162,22 @@ impl RoomObject {
         Response::from_websocket(client)
     }
 
-    async fn ensure_initialized(&mut self) -> Result<()> {
-        if self.initialized {
+    async fn ensure_initialized(&self) -> Result<()> {
+        if self.inner.borrow().initialized {
             return Ok(());
         }
-        self.initialized = true;
+        self.inner.borrow_mut().initialized = true;
 
-        // Get room_id: either from room_view (already set) or DO name
-        let room_id = if !self.room_view.id.is_empty() {
-            self.room_view.id.clone()
+        let cached_id = self.inner.borrow().room_view.id.clone();
+        let room_id = if !cached_id.is_empty() {
+            cached_id
         } else {
-            // Retrieve stored room_id or use DO stub name
             self.state
                 .storage()
                 .get::<String>("pending_room_id")
                 .await
+                .ok()
+                .flatten()
                 .unwrap_or_default()
         };
 
@@ -179,13 +190,14 @@ impl RoomObject {
         let _ = store.init_schema().await;
 
         let envelopes = store.replay().await.unwrap_or_default();
+        let mut inner = self.inner.borrow_mut();
         for env in envelopes {
-            apply_event(&mut self.room_view, &mut self.votes, &env.payload);
+            inner.apply(&env.payload);
         }
         Ok(())
     }
 
-    async fn handle_message(&mut self, ws: WebSocket, msg: ClientMessage) -> Result<()> {
+    async fn handle_message(&self, ws: WebSocket, msg: ClientMessage) -> Result<()> {
         match msg {
             ClientMessage::CreateRoom { name, deck_type } => {
                 let room_id = Uuid::new_v4().to_string();
@@ -218,14 +230,14 @@ impl RoomObject {
                 };
                 let _ = ws.serialize_attachment(serde_json::to_string(&tag).unwrap_or_default());
 
-                // Ensure we have this room's events loaded
-                if self.room_view.id.is_empty() {
+                if self.inner.borrow().room_view.id.is_empty() {
                     let db = self.env.d1("DB")?;
                     let store = DoEventStore::new(&db, &room_id);
                     let _ = store.init_schema().await;
                     let envelopes = store.replay().await.unwrap_or_default();
+                    let mut inner = self.inner.borrow_mut();
                     for env in envelopes {
-                        apply_event(&mut self.room_view, &mut self.votes, &env.payload);
+                        inner.apply(&env.payload);
                     }
                 }
 
@@ -394,7 +406,11 @@ impl RoomObject {
                 let _ = self
                     .update_room_jira_config(&room_id, &jira_base_url, &jira_project_key)
                     .await;
-                let _ = self.state.storage().put("jira_room_config", &room_config).await;
+                let _ = self
+                    .state
+                    .storage()
+                    .put("jira_room_config", &room_config)
+                    .await;
                 let _ = self.state.storage().put("jira_credentials", &creds).await;
 
                 match jira_handler::fetch_unestimated(&config).await {
@@ -430,11 +446,23 @@ impl RoomObject {
             }
 
             ClientMessage::ImportJiraTickets { room_id } => {
-                let room_cfg: Option<JiraRoomConfig> =
-                    self.state.storage().get("jira_room_config").await.ok();
-                let creds: Option<JiraCredentials> =
-                    self.state.storage().get("jira_credentials").await.ok();
-                let Some(config) = room_cfg.zip(creds).map(|(c, k)| JiraConfig::from_parts(c, k))
+                let room_cfg: Option<JiraRoomConfig> = self
+                    .state
+                    .storage()
+                    .get("jira_room_config")
+                    .await
+                    .ok()
+                    .flatten();
+                let creds: Option<JiraCredentials> = self
+                    .state
+                    .storage()
+                    .get("jira_credentials")
+                    .await
+                    .ok()
+                    .flatten();
+                let Some(config) = room_cfg
+                    .zip(creds)
+                    .map(|(c, k)| JiraConfig::from_parts(c, k))
                 else {
                     return Err(Error::RustError(
                         "no Jira project linked to this room".to_string(),
@@ -477,7 +505,7 @@ impl RoomObject {
     }
 
     async fn end_session(
-        &mut self,
+        &self,
         room_id: &str,
         session_id: &str,
         final_estimate: Option<String>,
@@ -495,29 +523,43 @@ impl RoomObject {
         .await?;
         self.broadcast_room_state();
 
-        let (jira_issue_key, final_est) = self
-            .room_view
-            .active_session
-            .as_ref()
-            .map(|s| (s.jira_issue_key.clone(), s.final_estimate.clone()))
-            .unwrap_or((None, None));
+        let (jira_issue_key, final_est) = {
+            let inner = self.inner.borrow();
+            inner
+                .room_view
+                .active_session
+                .as_ref()
+                .map(|s| (s.jira_issue_key.clone(), s.final_estimate.clone()))
+                .unwrap_or((None, None))
+        };
 
         if let (Some(issue_key), Some(est)) = (jira_issue_key, final_est) {
             if let Some(points) = estimate_to_points(&est) {
-                let config = {
-                    let room_cfg: Option<JiraRoomConfig> =
-                        self.state.storage().get("jira_room_config").await.ok();
-                    let creds: Option<JiraCredentials> =
-                        self.state.storage().get("jira_credentials").await.ok();
-                    room_cfg.zip(creds).map(|(c, k)| JiraConfig::from_parts(c, k))
-                };
-                if let Some(config) = config {
+                let room_cfg: Option<JiraRoomConfig> = self
+                    .state
+                    .storage()
+                    .get("jira_room_config")
+                    .await
+                    .ok()
+                    .flatten();
+                let creds: Option<JiraCredentials> = self
+                    .state
+                    .storage()
+                    .get("jira_credentials")
+                    .await
+                    .ok()
+                    .flatten();
+                if let Some(config) = room_cfg
+                    .zip(creds)
+                    .map(|(c, k)| JiraConfig::from_parts(c, k))
+                {
                     let push_ok = jira_handler::push_story_points(&config, &issue_key, points)
                         .await
                         .is_ok();
                     let status = if push_ok { "pushed" } else { "failed" };
 
-                    if let Some(session) = self.room_view.active_session.as_mut() {
+                    if let Some(session) = self.inner.borrow_mut().room_view.active_session.as_mut()
+                    {
                         session.jira_push_status = Some(status.to_string());
                     }
 
@@ -537,19 +579,19 @@ impl RoomObject {
         Ok(())
     }
 
-    async fn auto_reveal_session(&mut self, session_id: &str) -> Result<()> {
-        let room_id = self.room_view.id.clone();
+    async fn auto_reveal_session(&self, session_id: &str) -> Result<()> {
+        let room_id = self.inner.borrow().room_view.id.clone();
         self.end_session(&room_id, session_id, None).await
     }
 
-    async fn persist_and_apply(&mut self, subject: &str, event: &DomainEvent) -> Result<()> {
-        let room_id = self.room_view.id.clone();
+    async fn persist_and_apply(&self, subject: &str, event: &DomainEvent) -> Result<()> {
+        let room_id = self.inner.borrow().room_view.id.clone();
         self.persist_and_apply_for_room(&room_id, subject, event)
             .await
     }
 
     async fn persist_and_apply_for_room(
-        &mut self,
+        &self,
         room_id: &str,
         subject: &str,
         event: &DomainEvent,
@@ -560,12 +602,13 @@ impl RoomObject {
         store
             .append(&event_id, subject, event, now_millis())
             .await?;
-        apply_event(&mut self.room_view, &mut self.votes, event);
+        let mut inner = self.inner.borrow_mut();
+        inner.apply(event);
         Ok(())
     }
 
     fn broadcast_room_state(&self) {
-        let msg = ServerMessage::room_state(self.room_view.clone());
+        let msg = ServerMessage::room_state(self.inner.borrow().room_view.clone());
         self.broadcast(&msg);
     }
 

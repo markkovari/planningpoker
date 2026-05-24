@@ -17,7 +17,7 @@ pub async fn fetch_unestimated(
         config.story_points_field,
     );
 
-    let mut headers = Headers::new();
+    let headers = Headers::new();
     headers.set("Authorization", &config.basic_auth_header())?;
     headers.set("Accept", "application/json")?;
 
@@ -58,7 +58,7 @@ pub async fn push_story_points(
     let body_str =
         serde_json::to_string(&body).map_err(|e| worker::Error::RustError(e.to_string()))?;
 
-    let mut headers = Headers::new();
+    let headers = Headers::new();
     headers.set("Authorization", &config.basic_auth_header())?;
     headers.set("Content-Type", "application/json")?;
 
