@@ -9,6 +9,7 @@ export function usePokerSocket(url: string) {
   const [error, setError] = useState<string | null>(null);
   const [createdRoomId, setCreatedRoomId] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [jiraLinked, setJiraLinked] = useState<{ project_key: string; ticket_count: number } | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const queue = useRef<ClientMessage[]>([]);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -45,6 +46,8 @@ export function usePokerSocket(url: string) {
           setCreatedRoomId(msg.room_id);
         } else if (msg.type === "CountdownTick") {
           setCountdown(msg.remaining_secs > 0 ? msg.remaining_secs : null);
+        } else if (msg.type === "JiraLinked") {
+          setJiraLinked({ project_key: msg.project_key, ticket_count: msg.ticket_count });
         } else if (msg.type === "Error") {
           setError(msg.message);
         }
@@ -73,5 +76,5 @@ export function usePokerSocket(url: string) {
     }
   }, []);
 
-  return { room, connected, error, createdRoomId, countdown, send };
+  return { room, connected, error, createdRoomId, countdown, jiraLinked, send };
 }
