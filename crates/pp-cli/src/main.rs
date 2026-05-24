@@ -1,8 +1,15 @@
 use clap::{Parser, Subcommand};
 use pp_events::{DomainEvent, RoomEvent, SessionEvent, VoteEvent};
 use pp_store::{subjects::Subjects, EventStore, NatsEventStore};
-use time::OffsetDateTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 #[derive(Parser)]
 #[command(name = "pp", about = "Planning Poker CLI")]
@@ -75,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
                 name,
                 deck_type,
                 facilitator_id,
-                created_at: OffsetDateTime::now_utc(),
+                created_at: now_millis(),
             });
             let subject = Subjects::room_created(&room_id);
             let envelope = store.publish(&subject, event).await?;
@@ -92,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
                 room_id: room_id.clone(),
                 ticket_id,
                 ticket_description: description,
-                started_at: OffsetDateTime::now_utc(),
+                started_at: now_millis(),
             });
             let subject = Subjects::session_started(&room_id, &session_id);
             let envelope = store.publish(&subject, event).await?;
@@ -110,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
                 room_id: room_id.clone(),
                 participant_id: participant_id.clone(),
                 card: parsed,
-                cast_at: OffsetDateTime::now_utc(),
+                cast_at: now_millis(),
             });
             let subject = Subjects::vote_cast(&room_id, &session_id, &participant_id);
             let envelope = store.publish(&subject, event).await?;
@@ -124,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
                 session_id: session_id.clone(),
                 room_id: room_id.clone(),
                 final_estimate: None,
-                revealed_at: OffsetDateTime::now_utc(),
+                revealed_at: now_millis(),
             });
             let subject = Subjects::session_ended(&room_id, &session_id);
             let envelope = store.publish(&subject, event).await?;
@@ -135,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
             let events = store.replay(&filter).await?;
             println!("{} events for room {room_id}:", events.len());
             for e in events {
-                println!("  [{}] seq={} {}", e.occurred_at, e.sequence, e.subject);
+                println!("  [{}ms] seq={} {}", e.occurred_at, e.sequence, e.subject);
             }
         }
     }

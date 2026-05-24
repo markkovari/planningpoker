@@ -4,10 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-pp-store   = { workspace = true }
 pp-events  = { workspace = true }
 pp-domain  = { workspace = true, features = ["serde"] }
-tokio      = { workspace = true }
 dashmap    = { workspace = true }
 serde      = { workspace = true }
-tracing    = { workspace = true }

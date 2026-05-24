@@ -1,0 +1,38 @@
+name = "pp-worker"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "ROOM_OBJECT"
+class_name = "RoomObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RoomObject"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "planning-poker"
+# Fill in after: wrangler d1 create planning-poker
+database_id = ""
+
+[vars]
+JIRA_CUSTOM_FIELD = "customfield_10016"
+
+# Secrets (set with `wrangler secret put`):
+#   JIRA_API_TOKEN   — Jira API token
+#   JIRA_EMAIL       — Jira account email for Basic auth
+
+[triggers]
+crons = ["0 */6 * * *"]
+
+[assets]
+directory = "../../apps/web/dist"
+
+# Local dev: wrangler dev --port 8787
+# Apply D1 schema: wrangler d1 execute planning-poker --local --file ../../migrations/d1/schema.sql
+# Deploy: wrangler deploy

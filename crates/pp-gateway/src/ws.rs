@@ -13,8 +13,16 @@ use pp_store::EventStore;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 use tracing::{error, instrument, warn};
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// Per-connection identity captured at JoinRoom time.
 #[derive(Clone, Debug)]
@@ -194,7 +202,6 @@ async fn handle_client_message(
 ) -> Result<Option<ServerMessage>, Box<dyn std::error::Error + Send + Sync>> {
     use pp_events::{RoomEvent, SessionEvent};
     use pp_store::subjects::Subjects;
-    use time::OffsetDateTime;
     use uuid::Uuid;
 
     match msg {
@@ -206,7 +213,7 @@ async fn handle_client_message(
                 name: name.clone(),
                 deck_type: resolved_deck,
                 facilitator_id: String::new(),
-                created_at: OffsetDateTime::now_utc(),
+                created_at: now_millis(),
             });
             let subject = Subjects::room_created(&room_id);
             let envelope = state.store.publish(&subject, event).await?;
@@ -225,7 +232,7 @@ async fn handle_client_message(
                 ticket_id: ticket_id.clone(),
                 title,
                 description,
-                added_at: OffsetDateTime::now_utc(),
+                added_at: now_millis(),
             });
             let subject = Subjects::ticket_added(&room_id, &ticket_id);
             let envelope = state.store.publish(&subject, event).await?;
@@ -254,7 +261,7 @@ async fn handle_client_message(
                 participant_id,
                 display_name,
                 role: pp_domain::participant::Role::Voter,
-                joined_at: OffsetDateTime::now_utc(),
+                joined_at: now_millis(),
             });
             let subject = Subjects::participant_joined(&room_id);
             let envelope = state.store.publish(&subject, event).await?;
@@ -274,7 +281,7 @@ async fn handle_client_message(
                 room_id: room_id.clone(),
                 ticket_id,
                 ticket_description,
-                started_at: OffsetDateTime::now_utc(),
+                started_at: now_millis(),
             });
             let subject = Subjects::session_started(&room_id, &session_id);
             let envelope = state.store.publish(&subject, event).await?;
@@ -306,7 +313,7 @@ async fn handle_client_message(
                             session_id: sid.clone(),
                             room_id: rid.clone(),
                             final_estimate: None,
-                            revealed_at: OffsetDateTime::now_utc(),
+                            revealed_at: now_millis(),
                         });
                         let subject = Subjects::session_ended(&rid, &sid);
                         if let Ok(env) = state2.store.publish(&subject, reveal_event).await {
@@ -332,7 +339,7 @@ async fn handle_client_message(
                 room_id: room_id.clone(),
                 participant_id: participant_id.clone(),
                 card: parsed,
-                cast_at: OffsetDateTime::now_utc(),
+                cast_at: now_millis(),
             });
             let subject = Subjects::vote_cast(&room_id, &session_id, &participant_id);
             let envelope = state.store.publish(&subject, event).await?;
@@ -351,7 +358,7 @@ async fn handle_client_message(
                 session_id: session_id.clone(),
                 room_id: room_id.clone(),
                 participant_id: participant_id.clone(),
-                retracted_at: OffsetDateTime::now_utc(),
+                retracted_at: now_millis(),
             });
             let subject = Subjects::vote_retracted(&room_id, &session_id, &participant_id);
             let envelope = state.store.publish(&subject, event).await?;
@@ -367,7 +374,7 @@ async fn handle_client_message(
                 session_id: session_id.clone(),
                 room_id: room_id.clone(),
                 final_estimate: None,
-                revealed_at: OffsetDateTime::now_utc(),
+                revealed_at: now_millis(),
             });
             let subject = Subjects::session_ended(&room_id, &session_id);
             let envelope = state.store.publish(&subject, event).await?;
@@ -382,7 +389,7 @@ async fn handle_client_message(
             let event = DomainEvent::Session(SessionEvent::SessionReset {
                 session_id: session_id.clone(),
                 room_id: room_id.clone(),
-                reset_at: OffsetDateTime::now_utc(),
+                reset_at: now_millis(),
             });
             let subject = Subjects::session_reset(&room_id, &session_id);
             let envelope = state.store.publish(&subject, event).await?;

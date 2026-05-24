@@ -12,5 +12,4 @@ thiserror    = { workspace = true }
 tracing      = { workspace = true }
 async-trait  = "0.1"
 uuid         = { workspace = true }
-time         = { workspace = true }
 futures-util = "0.3"

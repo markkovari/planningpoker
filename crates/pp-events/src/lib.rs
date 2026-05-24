@@ -16,13 +16,12 @@ pub enum DomainEvent {
     Vote(VoteEvent),
 }
 
-/// Envelope written to / read from NATS JetStream.
+/// Envelope written to / read from the event store.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventEnvelope {
     pub id: String,
     pub sequence: u64,
     pub subject: String,
     pub payload: DomainEvent,
-    #[serde(with = "time::serde::rfc3339")]
-    pub occurred_at: time::OffsetDateTime,
+    pub occurred_at: u64,
 }

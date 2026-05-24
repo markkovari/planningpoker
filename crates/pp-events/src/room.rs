@@ -1,7 +1,6 @@
 use pp_domain::participant::Role;
 use pp_domain::room::DeckType;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -11,44 +10,46 @@ pub enum RoomEvent {
         name: String,
         deck_type: DeckType,
         facilitator_id: String,
-        #[serde(with = "time::serde::rfc3339")]
-        created_at: OffsetDateTime,
+        created_at: u64,
     },
     ParticipantJoined {
         room_id: String,
         participant_id: String,
         display_name: String,
         role: Role,
-        #[serde(with = "time::serde::rfc3339")]
-        joined_at: OffsetDateTime,
+        joined_at: u64,
     },
     ParticipantLeft {
         room_id: String,
         participant_id: String,
-        #[serde(with = "time::serde::rfc3339")]
-        left_at: OffsetDateTime,
+        left_at: u64,
     },
     ParticipantRenamed {
         room_id: String,
         participant_id: String,
         new_name: String,
-        #[serde(with = "time::serde::rfc3339")]
-        changed_at: OffsetDateTime,
+        changed_at: u64,
     },
     ParticipantRoleChanged {
         room_id: String,
         participant_id: String,
         new_role: Role,
-        #[serde(with = "time::serde::rfc3339")]
-        changed_at: OffsetDateTime,
+        changed_at: u64,
     },
     TicketAdded {
         room_id: String,
         ticket_id: String,
         title: String,
         description: Option<String>,
-        #[serde(with = "time::serde::rfc3339")]
-        added_at: OffsetDateTime,
+        added_at: u64,
+    },
+    JiraTicketImported {
+        room_id: String,
+        issue_key: String,
+        summary: String,
+        description: Option<String>,
+        jira_base_url: String,
+        imported_at: u64,
     },
 }
 
@@ -60,7 +61,8 @@ impl RoomEvent {
             | RoomEvent::ParticipantLeft { room_id, .. }
             | RoomEvent::ParticipantRenamed { room_id, .. }
             | RoomEvent::ParticipantRoleChanged { room_id, .. }
-            | RoomEvent::TicketAdded { room_id, .. } => room_id,
+            | RoomEvent::TicketAdded { room_id, .. }
+            | RoomEvent::JiraTicketImported { room_id, .. } => room_id,
         }
     }
 }

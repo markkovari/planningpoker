@@ -1,6 +1,5 @@
 use pp_domain::card::Card;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -10,15 +9,13 @@ pub enum VoteEvent {
         room_id: String,
         participant_id: String,
         card: Card,
-        #[serde(with = "time::serde::rfc3339")]
-        cast_at: OffsetDateTime,
+        cast_at: u64,
     },
     VoteRetracted {
         session_id: String,
         room_id: String,
         participant_id: String,
-        #[serde(with = "time::serde::rfc3339")]
-        retracted_at: OffsetDateTime,
+        retracted_at: u64,
     },
 }
 

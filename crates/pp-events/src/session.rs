@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -9,21 +8,18 @@ pub enum SessionEvent {
         room_id: String,
         ticket_id: Option<String>,
         ticket_description: Option<String>,
-        #[serde(with = "time::serde::rfc3339")]
-        started_at: OffsetDateTime,
+        started_at: u64,
     },
     SessionEnded {
         session_id: String,
         room_id: String,
         final_estimate: Option<String>,
-        #[serde(with = "time::serde::rfc3339")]
-        revealed_at: OffsetDateTime,
+        revealed_at: u64,
     },
     SessionReset {
         session_id: String,
         room_id: String,
-        #[serde(with = "time::serde::rfc3339")]
-        reset_at: OffsetDateTime,
+        reset_at: u64,
     },
 }
 

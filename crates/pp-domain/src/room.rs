@@ -11,8 +11,9 @@ impl fmt::Display for RoomId {
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DeckType {
+    #[default]
     Fibonacci,
     TShirt,
 }

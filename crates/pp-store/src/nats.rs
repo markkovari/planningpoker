@@ -2,9 +2,16 @@ use crate::subjects::{STREAM_FILTER, STREAM_NAME};
 use crate::{EventStore, StoreError};
 use async_nats::jetstream::{self, stream::Config as StreamConfig};
 use pp_events::{DomainEvent, EventEnvelope};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::instrument;
 use uuid::Uuid;
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// Events older than this are purged from the stream — rooms become unreachable after this window.
 const ROOM_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -59,7 +66,7 @@ impl EventStore for NatsEventStore {
             sequence: 0, // filled after ack
             subject: subject.to_string(),
             payload: event,
-            occurred_at: time::OffsetDateTime::now_utc(),
+            occurred_at: now_millis(),
         };
 
         let bytes = serde_json::to_vec(&envelope)?;

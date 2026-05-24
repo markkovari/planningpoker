@@ -3,6 +3,7 @@ use pp_domain::participant::Role;
 use pp_domain::room::DeckType;
 use pp_events::{DomainEvent, RoomEvent, SessionEvent, VoteEvent};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -15,7 +16,7 @@ pub struct ParticipantView {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VoteView {
     pub participant_id: String,
-    pub card: Option<String>, // None until revealed
+    pub card: Option<String>,
     pub has_voted: bool,
 }
 
@@ -27,6 +28,8 @@ pub struct SessionView {
     pub revealed: bool,
     pub votes: Vec<VoteView>,
     pub final_estimate: Option<String>,
+    pub jira_issue_key: Option<String>,
+    pub jira_push_status: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -34,9 +37,11 @@ pub struct TicketView {
     pub id: String,
     pub title: String,
     pub description: Option<String>,
+    pub jira_issue_key: Option<String>,
+    pub jira_url: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RoomView {
     pub id: String,
     pub name: String,
@@ -46,10 +51,236 @@ pub struct RoomView {
     pub ticket_queue: Vec<TicketView>,
 }
 
-/// In-memory store of room read models, keyed by room_id.
+/// Pure event application for a single room. Used by the Durable Object worker.
+/// votes: (session_id, participant_id) → card string, kept hidden until reveal.
+pub fn apply_event(
+    room: &mut RoomView,
+    votes: &mut HashMap<(String, String), String>,
+    event: &DomainEvent,
+) {
+    match event {
+        DomainEvent::Room(e) => apply_room_event(room, e),
+        DomainEvent::Session(e) => apply_session_event(room, votes, e),
+        DomainEvent::Vote(e) => apply_vote_event(room, votes, e),
+    }
+}
+
+fn apply_room_event(room: &mut RoomView, event: &RoomEvent) {
+    match event {
+        RoomEvent::RoomCreated {
+            room_id,
+            name,
+            deck_type,
+            facilitator_id,
+            ..
+        } => {
+            let participants = if facilitator_id.is_empty() {
+                vec![]
+            } else {
+                vec![ParticipantView {
+                    id: facilitator_id.clone(),
+                    display_name: "Facilitator".to_string(),
+                    role: Role::Facilitator,
+                }]
+            };
+            *room = RoomView {
+                id: room_id.clone(),
+                name: name.clone(),
+                deck_type: *deck_type,
+                participants,
+                active_session: None,
+                ticket_queue: vec![],
+            };
+        }
+        RoomEvent::ParticipantJoined {
+            participant_id,
+            display_name,
+            role,
+            ..
+        } => {
+            if !room.participants.iter().any(|p| p.id == *participant_id) {
+                room.participants.push(ParticipantView {
+                    id: participant_id.clone(),
+                    display_name: display_name.clone(),
+                    role: *role,
+                });
+            }
+        }
+        RoomEvent::ParticipantLeft { participant_id, .. } => {
+            room.participants.retain(|p| p.id != *participant_id);
+        }
+        RoomEvent::ParticipantRenamed {
+            participant_id,
+            new_name,
+            ..
+        } => {
+            if let Some(p) = room.participants.iter_mut().find(|p| p.id == *participant_id) {
+                p.display_name = new_name.clone();
+            }
+        }
+        RoomEvent::ParticipantRoleChanged {
+            participant_id,
+            new_role,
+            ..
+        } => {
+            if let Some(p) = room.participants.iter_mut().find(|p| p.id == *participant_id) {
+                p.role = *new_role;
+            }
+        }
+        RoomEvent::TicketAdded {
+            ticket_id,
+            title,
+            description,
+            ..
+        } => {
+            room.ticket_queue.push(TicketView {
+                id: ticket_id.clone(),
+                title: title.clone(),
+                description: description.clone(),
+                jira_issue_key: None,
+                jira_url: None,
+            });
+        }
+        RoomEvent::JiraTicketImported {
+            issue_key,
+            summary,
+            description,
+            jira_base_url,
+            ..
+        } => {
+            if !room.ticket_queue.iter().any(|t| t.id == *issue_key) {
+                room.ticket_queue.push(TicketView {
+                    id: issue_key.clone(),
+                    title: summary.clone(),
+                    description: description.clone(),
+                    jira_issue_key: Some(issue_key.clone()),
+                    jira_url: Some(format!("{}/browse/{}", jira_base_url, issue_key)),
+                });
+            }
+        }
+    }
+}
+
+fn apply_session_event(
+    room: &mut RoomView,
+    votes: &mut HashMap<(String, String), String>,
+    event: &SessionEvent,
+) {
+    match event {
+        SessionEvent::SessionStarted {
+            session_id,
+            ticket_id,
+            ticket_description,
+            ..
+        } => {
+            let (tid, tdesc, jira_key) = if ticket_id.is_some() {
+                (ticket_id.clone(), ticket_description.clone(), None)
+            } else if !room.ticket_queue.is_empty() {
+                let t = room.ticket_queue.remove(0);
+                let jira = t.jira_issue_key.clone();
+                (Some(t.title), t.description, jira)
+            } else {
+                (None, None, None)
+            };
+            room.active_session = Some(SessionView {
+                id: session_id.clone(),
+                ticket_id: tid,
+                ticket_description: tdesc,
+                revealed: false,
+                votes: vec![],
+                final_estimate: None,
+                jira_issue_key: jira_key,
+                jira_push_status: None,
+            });
+        }
+        SessionEvent::SessionEnded {
+            session_id,
+            final_estimate,
+            ..
+        } => {
+            if let Some(session) = room.active_session.as_mut() {
+                if session.id == *session_id {
+                    session.revealed = true;
+                    session.final_estimate = final_estimate.clone();
+                    for vote in session.votes.iter_mut() {
+                        let key = (session_id.clone(), vote.participant_id.clone());
+                        if let Some(card) = votes.get(&key) {
+                            vote.card = Some(card.clone());
+                        }
+                    }
+                }
+            }
+        }
+        SessionEvent::SessionReset { session_id, .. } => {
+            if room
+                .active_session
+                .as_ref()
+                .is_some_and(|s| s.id == *session_id)
+            {
+                room.active_session = None;
+            }
+        }
+    }
+}
+
+fn apply_vote_event(
+    room: &mut RoomView,
+    votes: &mut HashMap<(String, String), String>,
+    event: &VoteEvent,
+) {
+    match event {
+        VoteEvent::VoteCast {
+            session_id,
+            room_id: _,
+            participant_id,
+            card,
+            ..
+        } => {
+            let card_str = card.to_string();
+            votes.insert((session_id.clone(), participant_id.clone()), card_str);
+
+            if let Some(session) = room.active_session.as_mut() {
+                if session.id == *session_id {
+                    let existing = session
+                        .votes
+                        .iter_mut()
+                        .find(|v| v.participant_id == *participant_id);
+                    if let Some(v) = existing {
+                        v.has_voted = true;
+                        v.card = None;
+                    } else {
+                        session.votes.push(VoteView {
+                            participant_id: participant_id.clone(),
+                            card: None,
+                            has_voted: true,
+                        });
+                    }
+                }
+            }
+        }
+        VoteEvent::VoteRetracted {
+            session_id,
+            room_id: _,
+            participant_id,
+            ..
+        } => {
+            votes.remove(&(session_id.clone(), participant_id.clone()));
+
+            if let Some(session) = room.active_session.as_mut() {
+                if session.id == *session_id {
+                    session
+                        .votes
+                        .retain(|v| v.participant_id != *participant_id);
+                }
+            }
+        }
+    }
+}
+
+/// In-memory store of room read models keyed by room_id.
+/// Used by the existing Axum gateway; depends on DashMap for concurrent access.
 pub struct RoomProjection {
     rooms: Arc<DashMap<String, RoomView>>,
-    /// raw votes stored until revealed: (session_id, participant_id) -> card string
     votes: Arc<DashMap<(String, String), String>>,
 }
 
@@ -171,7 +402,29 @@ impl RoomProjection {
                         id: ticket_id.clone(),
                         title: title.clone(),
                         description: description.clone(),
+                        jira_issue_key: None,
+                        jira_url: None,
                     });
+                }
+            }
+            RoomEvent::JiraTicketImported {
+                room_id,
+                issue_key,
+                summary,
+                description,
+                jira_base_url,
+                ..
+            } => {
+                if let Some(mut room) = self.rooms.get_mut(room_id) {
+                    if !room.ticket_queue.iter().any(|t| t.id == *issue_key) {
+                        room.ticket_queue.push(TicketView {
+                            id: issue_key.clone(),
+                            title: summary.clone(),
+                            description: description.clone(),
+                            jira_issue_key: Some(issue_key.clone()),
+                            jira_url: Some(format!("{}/browse/{}", jira_base_url, issue_key)),
+                        });
+                    }
                 }
             }
         }
@@ -187,14 +440,14 @@ impl RoomProjection {
                 ..
             } => {
                 if let Some(mut room) = self.rooms.get_mut(room_id) {
-                    // If no explicit ticket supplied, pop the front of the queue.
-                    let (tid, tdesc) = if ticket_id.is_some() {
-                        (ticket_id.clone(), ticket_description.clone())
+                    let (tid, tdesc, jira_key) = if ticket_id.is_some() {
+                        (ticket_id.clone(), ticket_description.clone(), None)
                     } else if !room.ticket_queue.is_empty() {
                         let t = room.ticket_queue.remove(0);
-                        (Some(t.title), t.description)
+                        let jira = t.jira_issue_key.clone();
+                        (Some(t.title), t.description, jira)
                     } else {
-                        (None, None)
+                        (None, None, None)
                     };
                     room.active_session = Some(SessionView {
                         id: session_id.clone(),
@@ -203,6 +456,8 @@ impl RoomProjection {
                         revealed: false,
                         votes: vec![],
                         final_estimate: None,
+                        jira_issue_key: jira_key,
+                        jira_push_status: None,
                     });
                 }
             }
@@ -217,7 +472,6 @@ impl RoomProjection {
                         if session.id == *session_id {
                             session.revealed = true;
                             session.final_estimate = final_estimate.clone();
-                            // fill in hidden cards now revealed
                             for vote in session.votes.iter_mut() {
                                 let key = (session_id.clone(), vote.participant_id.clone());
                                 if let Some(card) = self.votes.get(&key) {
@@ -268,7 +522,7 @@ impl RoomProjection {
                                 .find(|v| v.participant_id == *participant_id);
                             if let Some(v) = existing {
                                 v.has_voted = true;
-                                v.card = None; // hidden until reveal
+                                v.card = None;
                             } else {
                                 session.votes.push(VoteView {
                                     participant_id: participant_id.clone(),

@@ -17,4 +17,3 @@ async-nats = { workspace = true }
 serde_json = { workspace = true }
 uuid       = { workspace = true }
 anyhow     = "1"
-time       = { workspace = true }
