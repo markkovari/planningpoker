@@ -4,6 +4,8 @@ node_modules
 apps/*/dist
 apps/packages/*/dist
 apps/e2e/playwright-report
+apps/e2e/playwright-report-wrangler
 apps/e2e/test-results
+crates/pp-worker/.wrangler
 
 **ruvector**
