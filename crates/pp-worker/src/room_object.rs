@@ -24,13 +24,14 @@ fn jsf(f: f64) -> JsValue {
     JsValue::from_f64(f)
 }
 
-struct Inner {
+struct RoomInner {
     room_view: RoomView,
     votes: HashMap<(String, String), String>,
     initialized: bool,
+    ws_message_counts: HashMap<String, (u32, u64)>,
 }
 
-impl Inner {
+impl RoomInner {
     fn apply(&mut self, event: &DomainEvent) {
         apply_event(&mut self.room_view, &mut self.votes, event);
     }
@@ -40,7 +41,7 @@ impl Inner {
 pub struct RoomObject {
     state: State,
     env: Env,
-    inner: RefCell<Inner>,
+    inner: RefCell<RoomInner>,
 }
 
 impl DurableObject for RoomObject {
@@ -48,10 +49,11 @@ impl DurableObject for RoomObject {
         Self {
             state,
             env,
-            inner: RefCell::new(Inner {
+            inner: RefCell::new(RoomInner {
                 room_view: RoomView::default(),
                 votes: HashMap::new(),
                 initialized: false,
+                ws_message_counts: HashMap::new(),
             }),
         }
     }
@@ -109,6 +111,30 @@ impl DurableObject for RoomObject {
             _ => return Ok(()),
         };
 
+        if let Some(participant_id) = self.participant_id_from_ws(&ws) {
+            let now = now_millis();
+            let mut inner = self.inner.borrow_mut();
+            let entry = inner
+                .ws_message_counts
+                .entry(participant_id)
+                .or_insert((0u32, now));
+            if now - entry.1 >= 1000 {
+                entry.0 = 0;
+                entry.1 = now;
+            }
+            entry.0 += 1;
+            if entry.0 > 10 {
+                drop(inner);
+                let _ = ws.send_with_str(
+                    &serde_json::to_string(&ServerMessage::error(
+                        "rate limit exceeded".to_string(),
+                    ))
+                    .unwrap_or_default(),
+                );
+                return Ok(());
+            }
+        }
+
         let _ = self.ensure_initialized().await;
 
         let msg: ClientMessage = match serde_json::from_str(&text) {
@@ -132,11 +158,14 @@ impl DurableObject for RoomObject {
 
     async fn websocket_close(
         &self,
-        _ws: WebSocket,
+        ws: WebSocket,
         _code: usize,
         _reason: String,
         _was_clean: bool,
     ) -> Result<()> {
+        if let Some(participant_id) = self.participant_id_from_ws(&ws) {
+            self.inner.borrow_mut().ws_message_counts.remove(&participant_id);
+        }
         Ok(())
     }
 }
@@ -168,9 +197,12 @@ impl RoomObject {
         }
         self.inner.borrow_mut().initialized = true;
 
-        let cached_id = self.inner.borrow().room_view.id.clone();
-        let room_id = if !cached_id.is_empty() {
-            cached_id
+        let db = self.env.d1("DB")?;
+        // Always ensure the schema exists — CreateRoom runs against a fresh DO with no room yet
+        DoEventStore::new(&db, "").init_schema().await?;
+
+        let room_id = if !self.inner.borrow().room_view.id.is_empty() {
+            self.inner.borrow().room_view.id.clone()
         } else {
             self.state
                 .storage()
@@ -185,7 +217,6 @@ impl RoomObject {
             return Ok(());
         }
 
-        let db = self.env.d1("DB")?;
         let store = DoEventStore::new(&db, &room_id);
         let _ = store.init_schema().await;
 
@@ -199,14 +230,14 @@ impl RoomObject {
 
     async fn handle_message(&self, ws: WebSocket, msg: ClientMessage) -> Result<()> {
         match msg {
-            ClientMessage::CreateRoom { name, deck_type } => {
+            ClientMessage::CreateRoom { name, deck_type, creator_id } => {
                 let room_id = Uuid::new_v4().to_string();
                 let resolved = deck_type.unwrap_or(pp_domain::room::DeckType::Fibonacci);
                 let event = DomainEvent::Room(RoomEvent::RoomCreated {
                     room_id: room_id.clone(),
                     name: name.clone(),
                     deck_type: resolved,
-                    facilitator_id: String::new(),
+                    facilitator_id: creator_id,
                     created_at: now_millis(),
                 });
                 self.persist_and_apply_for_room(&room_id, "pp.room.created", &event)
@@ -241,11 +272,16 @@ impl RoomObject {
                     }
                 }
 
+                let role = if participant_id == self.inner.borrow().room_view.facilitator_id {
+                    Role::Facilitator
+                } else {
+                    Role::Voter
+                };
                 let event = DomainEvent::Room(RoomEvent::ParticipantJoined {
                     room_id: room_id.clone(),
                     participant_id,
                     display_name,
-                    role: Role::Voter,
+                    role,
                     joined_at: now_millis(),
                 });
                 self.persist_and_apply_for_room(
@@ -281,6 +317,12 @@ impl RoomObject {
                 ticket_description,
                 countdown_secs,
             } => {
+                if !self.is_facilitator(&ws) {
+                    let _ = ws.send_with_str(
+                        &serde_json::to_string(&ServerMessage::error("only the facilitator can start a session")).unwrap_or_default(),
+                    );
+                    return Ok(());
+                }
                 let session_id = Uuid::new_v4().to_string();
                 let event = DomainEvent::Session(SessionEvent::SessionStarted {
                     session_id: session_id.clone(),
@@ -358,6 +400,12 @@ impl RoomObject {
                 room_id,
                 session_id,
             } => {
+                if !self.is_facilitator(&ws) {
+                    let _ = ws.send_with_str(
+                        &serde_json::to_string(&ServerMessage::error("only the facilitator can reveal votes")).unwrap_or_default(),
+                    );
+                    return Ok(());
+                }
                 self.end_session(&room_id, &session_id, None).await?;
             }
 
@@ -365,6 +413,12 @@ impl RoomObject {
                 room_id,
                 session_id,
             } => {
+                if !self.is_facilitator(&ws) {
+                    let _ = ws.send_with_str(
+                        &serde_json::to_string(&ServerMessage::error("only the facilitator can reset a session")).unwrap_or_default(),
+                    );
+                    return Ok(());
+                }
                 let _ = self.state.storage().delete("countdown").await;
                 let event = DomainEvent::Session(SessionEvent::SessionReset {
                     session_id: session_id.clone(),
@@ -619,6 +673,18 @@ impl RoomObject {
         for ws in self.state.get_websockets() {
             let _ = ws.send_with_str(&text);
         }
+    }
+
+    fn is_facilitator(&self, ws: &WebSocket) -> bool {
+        let Some(pid) = self.participant_id_from_ws(ws) else {
+            return false;
+        };
+        self.inner
+            .borrow()
+            .room_view
+            .participants
+            .iter()
+            .any(|p| p.id == pid && p.role == Role::Facilitator)
     }
 
     fn participant_id_from_ws(&self, ws: &WebSocket) -> Option<String> {

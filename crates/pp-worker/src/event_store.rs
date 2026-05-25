@@ -13,7 +13,7 @@ impl<'a> DoEventStore<'a> {
 
     pub async fn init_schema(&self) -> Result<()> {
         self.db
-            .exec(
+            .prepare(
                 "CREATE TABLE IF NOT EXISTS events (
                     seq         INTEGER PRIMARY KEY AUTOINCREMENT,
                     event_id    TEXT NOT NULL UNIQUE,
@@ -21,9 +21,13 @@ impl<'a> DoEventStore<'a> {
                     subject     TEXT NOT NULL,
                     payload     TEXT NOT NULL,
                     occurred_at INTEGER NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_events_room ON events(room_id, seq);",
+                )",
             )
+            .run()
+            .await?;
+        self.db
+            .prepare("CREATE INDEX IF NOT EXISTS idx_events_room ON events(room_id, seq)")
+            .run()
             .await?;
         Ok(())
     }

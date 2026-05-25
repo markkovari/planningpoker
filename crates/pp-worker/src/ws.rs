@@ -9,6 +9,7 @@ pub enum ClientMessage {
     CreateRoom {
         name: String,
         deck_type: Option<DeckType>,
+        creator_id: String,
     },
     JoinRoom {
         room_id: String,

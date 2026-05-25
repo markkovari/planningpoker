@@ -7,6 +7,7 @@ interface VoteRevealProps {
   votes: VoteView[];
   onStartNew?: () => void;
   onReset?: () => void;
+  isFacilitator?: boolean;
 }
 
 const NUMERIC = /^\d+(\.\d+)?$/;
@@ -17,7 +18,7 @@ function parseNum(card: string): number | null {
   return fib[card] ?? null;
 }
 
-export function VoteReveal({ votes, onStartNew, onReset }: VoteRevealProps) {
+export function VoteReveal({ votes, onStartNew, onReset, isFacilitator = false }: VoteRevealProps) {
   const counts = new Map<string, number>();
   for (const v of votes) {
     if (v.card) counts.set(v.card, (counts.get(v.card) ?? 0) + 1);
@@ -36,6 +37,7 @@ export function VoteReveal({ votes, onStartNew, onReset }: VoteRevealProps) {
   const max = hasNumeric ? Math.max(...numericVotes) : null;
   const avg = hasNumeric ? numericVotes.reduce((a, b) => a + b, 0) / numericVotes.length : null;
   const consensus = sorted.length === 1 || (sorted[0]?.[1] === total && total > 0);
+  const agreement = total > 0 ? Math.round(((sorted[0]?.[1] ?? 0) / total) * 100) : null;
 
   return (
     <div className="space-y-4">
@@ -61,34 +63,42 @@ export function VoteReveal({ votes, onStartNew, onReset }: VoteRevealProps) {
         ))}
       </div>
 
-      {hasNumeric && (
-        <div className="grid grid-cols-3 gap-2 text-center text-sm">
-          <div className="rounded-md bg-[hsl(var(--muted))] py-2">
-            <div className="font-semibold">{min}</div>
-            <div className="text-xs text-[hsl(var(--muted-foreground))]">Min</div>
-          </div>
-          <div className="rounded-md bg-[hsl(var(--muted))] py-2">
-            <div className="font-semibold">{avg?.toFixed(1)}</div>
-            <div className="text-xs text-[hsl(var(--muted-foreground))]">Avg</div>
-          </div>
-          <div className="rounded-md bg-[hsl(var(--muted))] py-2">
-            <div className="font-semibold">{max}</div>
-            <div className="text-xs text-[hsl(var(--muted-foreground))]">Max</div>
-          </div>
+      {(hasNumeric || agreement !== null) && (
+        <div className="grid grid-cols-4 gap-2 text-center text-sm">
+          {hasNumeric && (
+            <div className="rounded-md bg-[hsl(var(--muted))] py-2">
+              <div className="font-semibold">{min}</div>
+              <div className="text-xs text-[hsl(var(--muted-foreground))]">Min</div>
+            </div>
+          )}
+          {hasNumeric && (
+            <div className="rounded-md bg-[hsl(var(--muted))] py-2">
+              <div className="font-semibold">{avg?.toFixed(1)}</div>
+              <div className="text-xs text-[hsl(var(--muted-foreground))]">Avg</div>
+            </div>
+          )}
+          {hasNumeric && (
+            <div className="rounded-md bg-[hsl(var(--muted))] py-2">
+              <div className="font-semibold">{max}</div>
+              <div className="text-xs text-[hsl(var(--muted-foreground))]">Max</div>
+            </div>
+          )}
+          {agreement !== null && (
+            <div className={`rounded-md py-2 ${consensus ? "bg-[hsl(var(--success))]/15 text-[hsl(var(--success))]" : "bg-[hsl(var(--muted))]"}`}>
+              <div className="font-semibold">{agreement}%</div>
+              <div className="text-xs opacity-70">Agreement</div>
+            </div>
+          )}
         </div>
       )}
 
       <div className="flex flex-wrap gap-2 pt-1">
-        {onStartNew && (
-          <Button data-testid="start-new-btn" onClick={onStartNew} className="flex-1 sm:flex-none">
-            Vote on new ticket
-          </Button>
-        )}
-        {onReset && (
-          <Button data-testid="reset-from-reveal-btn" onClick={onReset} variant="outline" className="flex-1 sm:flex-none">
-            Re-vote this ticket
-          </Button>
-        )}
+        <Button data-testid="start-new-btn" onClick={onStartNew} className="flex-1 sm:flex-none" disabled={!isFacilitator}>
+          Vote on new ticket
+        </Button>
+        <Button data-testid="reset-from-reveal-btn" onClick={onReset} variant="outline" className="flex-1 sm:flex-none" disabled={!isFacilitator}>
+          Re-vote this ticket
+        </Button>
       </div>
     </div>
   );

@@ -24,7 +24,17 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 const SESSION_KEY = "pp_last_session";
 import { usePokerSocket } from "./usePokerSocket";
 
-const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
+const WS_BASE = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
+
+function getOrCreateParticipantId(roomId: string): string {
+  if (!roomId) return crypto.randomUUID();
+  const key = `pp_pid_${roomId}`;
+  const stored = localStorage.getItem(key);
+  if (stored) return stored;
+  const id = crypto.randomUUID();
+  localStorage.setItem(key, id);
+  return id;
+}
 
 const FIBONACCI_CARDS = ["0", "1", "2", "3", "5", "8", "13", "21", "34", "55", "89", "?", "☕"];
 const TSHIRT_CARDS = ["XS", "S", "M", "L", "XL", "XXL", "?", "☕"];
@@ -96,18 +106,41 @@ function loadLastSession(): SavedSession | null {
 }
 
 export function App() {
-  const { room, connected, error, createdRoomId, countdown, jiraLinked, send } = usePokerSocket(WS_URL);
+  const initialRoomId = new URLSearchParams(window.location.search).get("room") ?? "";
+  const [wsUrl, setWsUrl] = useState(
+    initialRoomId ? `${WS_BASE}?room=${initialRoomId}` : WS_BASE
+  );
+  const { room, connected, error, createdRoomId, countdown, jiraLinked, send } = usePokerSocket(wsUrl);
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
-  const [roomId, setRoomId] = useState(() => new URLSearchParams(window.location.search).get("room") ?? "");
+  const [roomId, setRoomId] = useState(initialRoomId);
   const [joined, setJoined] = useState(false);
   const [roomName, setRoomName] = useState("");
   const [deckType, setDeckType] = useState<DeckType>("Fibonacci");
   const [countdownSecs, setCountdownSecs] = useState<number>(0);
   const lastSession = loadLastSession();
-  const participantId = useRef(lastSession?.participantId ?? crypto.randomUUID());
+  const participantId = useRef(
+    initialRoomId ? getOrCreateParticipantId(initialRoomId) : (lastSession?.participantId ?? crypto.randomUUID())
+  );
   const nameInputRef = useRef<HTMLInputElement>(null);
   const { copied: linkCopied, copy: copyLink } = useCopyToClipboard();
+  const pendingJoin = useRef<{ room_id: string; display_name: string } | null>(null);
+  // After first JoinRoom, keep data here so reconnects can re-send it to restore ConnTag
+  const joinedRoom = useRef<{ room_id: string; display_name: string } | null>(null);
+
+  // Fire JoinRoom once WS (re)connects to the room DO — restores server-side ConnTag on reconnect
+  useEffect(() => {
+    if (!connected) return;
+    if (pendingJoin.current) {
+      const { room_id, display_name } = pendingJoin.current;
+      pendingJoin.current = null;
+      joinedRoom.current = { room_id, display_name };
+      send({ type: "JoinRoom", room_id, participant_id: participantId.current, display_name });
+    } else if (joinedRoom.current) {
+      // Reconnected after being in a room — re-send JoinRoom to restore ConnTag
+      send({ type: "JoinRoom", room_id: joinedRoom.current.room_id, participant_id: participantId.current, display_name: joinedRoom.current.display_name });
+    }
+  }, [connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const urlRoomId = new URLSearchParams(window.location.search).get("room");
   const [showResumePrompt, setShowResumePrompt] = useState(
@@ -123,18 +156,14 @@ export function App() {
 
   useEffect(() => {
     if (!createdRoomId) return;
+    // Persist the participant ID so the creator regains Facilitator role on reload
+    localStorage.setItem(`pp_pid_${createdRoomId}`, participantId.current);
     setRoomId(createdRoomId);
+    setWsUrl(`${WS_BASE}?room=${createdRoomId}`);
     if (displayName.trim()) {
-      // Name already filled — auto-join immediately
-      send({
-        type: "JoinRoom",
-        room_id: createdRoomId,
-        participant_id: participantId.current,
-        display_name: displayName.trim(),
-      });
+      pendingJoin.current = { room_id: createdRoomId, display_name: displayName.trim() };
       setJoined(true);
     } else {
-      // Focus name field so user can type name and hit Enter/Join
       setTimeout(() => nameInputRef.current?.focus(), 50);
     }
   }, [createdRoomId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -154,20 +183,27 @@ export function App() {
     }
   }, [joined, roomId, displayName]);
 
+  const isFacilitator = room?.participants.find((p) => p.id === participantId.current)?.role === "Facilitator";
+
   const createRoom = () => {
     const name = roomName.trim();
     if (!name) return;
-    send({ type: "CreateRoom", name, deck_type: deckType });
+    send({ type: "CreateRoom", name, deck_type: deckType, creator_id: participantId.current });
   };
 
   const join = () => {
     if (!roomId || !displayName) return;
-    send({
-      type: "JoinRoom",
-      room_id: roomId,
-      participant_id: participantId.current,
-      display_name: displayName,
-    });
+    // Use stable per-room participant ID so role survives page reloads
+    const pid = getOrCreateParticipantId(roomId);
+    participantId.current = pid;
+    const targetUrl = `${WS_BASE}?room=${roomId}`;
+    if (wsUrl === targetUrl && connected) {
+      joinedRoom.current = { room_id: roomId, display_name: displayName };
+      send({ type: "JoinRoom", room_id: roomId, participant_id: pid, display_name: displayName });
+    } else {
+      pendingJoin.current = { room_id: roomId, display_name: displayName };
+      setWsUrl(targetUrl);
+    }
     setJoined(true);
   };
 
@@ -220,6 +256,11 @@ export function App() {
       display_name: lastSession.displayName,
     });
     setJoined(true);
+  };
+
+  const importJiraTickets = () => {
+    if (!room) return;
+    send({ type: "ImportJiraTickets", room_id: room.id });
   };
 
   const cards = room?.deck_type === "TShirt" ? TSHIRT_CARDS : FIBONACCI_CARDS;
@@ -457,11 +498,11 @@ export function App() {
             <Card>
               <CardContent className="pt-6 space-y-5">
                 {room && !room.active_session && (
-                  <Button data-testid="start-session-btn" onClick={startSession} className="w-full">
+                  <Button data-testid="start-session-btn" onClick={startSession} className="w-full" disabled={!isFacilitator}>
                     Start Session
                   </Button>
                 )}
-                <SessionHeader session={room?.active_session ?? null} onReveal={reveal} onReset={reset} />
+                <SessionHeader session={room?.active_session ?? null} onReveal={reveal} onReset={reset} isFacilitator={isFacilitator} />
               </CardContent>
             </Card>
 
@@ -469,6 +510,7 @@ export function App() {
               <div className="flex items-center justify-center gap-3 py-2">
                 <Timer className="h-5 w-5 text-[hsl(var(--primary))]" />
                 <span
+                  data-testid="countdown-display"
                   className={cn(
                     "text-4xl font-bold tabular-nums transition-colors",
                     countdown <= 5 ? "text-red-500" : "text-[hsl(var(--primary))]"
@@ -496,8 +538,9 @@ export function App() {
                 <CardContent className="pt-6">
                   <VoteReveal
                     votes={room.active_session.votes}
-                    onStartNew={startSession}
-                    onReset={reset}
+                    onStartNew={isFacilitator ? startSession : undefined}
+                    onReset={isFacilitator ? reset : undefined}
+                    isFacilitator={isFacilitator}
                   />
                 </CardContent>
               </Card>
@@ -546,40 +589,55 @@ export function App() {
             {room && (
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center justify-between">
-                    <span>Jira</span>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Link className="h-4 w-4" />
+                    Jira
                     {jiraLinked && (
-                      <Badge variant="secondary" className="text-xs">{jiraLinked.project_key} · {jiraLinked.ticket_count} tickets</Badge>
+                      <Badge variant="secondary" className="text-xs">{jiraLinked.project_key}</Badge>
                     )}
                   </CardTitle>
+                  {jiraLinked && !showJiraForm && (
+                    <CardDescription className="text-xs">
+                      {jiraLinked.ticket_count} unestimated ticket{jiraLinked.ticket_count !== 1 ? "s" : ""} imported
+                    </CardDescription>
+                  )}
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  {!showJiraForm ? (
-                    <Button variant="outline" size="sm" className="w-full" onClick={() => setShowJiraForm(true)}>
-                      {jiraLinked ? "Reconfigure Jira" : "Link Jira Project"}
-                    </Button>
+                <CardContent>
+                  {jiraLinked && !showJiraForm ? (
+                    <div className="space-y-2">
+                      <Button variant="outline" size="sm" className="w-full" onClick={importJiraTickets}>
+                        Re-import Tickets
+                      </Button>
+                      <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setShowJiraForm(true)}>
+                        Reconfigure
+                      </Button>
+                    </div>
                   ) : (
                     <form onSubmit={(e) => { e.preventDefault(); linkJira(); }} className="space-y-3">
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         <Label htmlFor="jira-url" className="text-xs">Base URL</Label>
-                        <Input id="jira-url" placeholder="https://myteam.atlassian.net" value={jiraBaseUrl} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJiraBaseUrl(e.target.value)} required />
+                        <Input id="jira-url" placeholder="https://yourorg.atlassian.net" value={jiraBaseUrl} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJiraBaseUrl(e.target.value)} className="h-8 text-xs" />
                       </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="jira-key" className="text-xs">Project key</Label>
-                        <Input id="jira-key" placeholder="PROJ" value={jiraProjectKey} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJiraProjectKey(e.target.value)} required />
+                      <div className="space-y-1.5">
+                        <Label htmlFor="jira-project" className="text-xs">Project Key</Label>
+                        <Input id="jira-project" placeholder="PROJ" value={jiraProjectKey} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJiraProjectKey(e.target.value)} className="h-8 text-xs" />
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         <Label htmlFor="jira-email" className="text-xs">Email</Label>
-                        <Input id="jira-email" type="email" placeholder="you@company.com" value={jiraEmail} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJiraEmail(e.target.value)} required />
+                        <Input id="jira-email" type="email" placeholder="you@company.com" value={jiraEmail} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJiraEmail(e.target.value)} className="h-8 text-xs" />
                       </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="jira-token" className="text-xs">API token</Label>
-                        <Input id="jira-token" type="password" placeholder="••••••••" value={jiraApiToken} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJiraApiToken(e.target.value)} required />
+                      <div className="space-y-1.5">
+                        <Label htmlFor="jira-token" className="text-xs">API Token</Label>
+                        <Input id="jira-token" type="password" placeholder="••••••••" value={jiraApiToken} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJiraApiToken(e.target.value)} className="h-8 text-xs" />
                       </div>
-                      <div className="flex gap-2">
-                        <Button type="submit" size="sm" className="flex-1">Connect</Button>
-                        <Button type="button" size="sm" variant="outline" onClick={() => setShowJiraForm(false)}>Cancel</Button>
-                      </div>
+                      <Button type="submit" size="sm" className="w-full" disabled={!jiraBaseUrl || !jiraProjectKey || !jiraEmail || !jiraApiToken}>
+                        Link Jira Project
+                      </Button>
+                      {jiraLinked && (
+                        <Button type="button" variant="ghost" size="sm" className="w-full text-xs" onClick={() => setShowJiraForm(false)}>
+                          Cancel
+                        </Button>
+                      )}
                     </form>
                   )}
                 </CardContent>

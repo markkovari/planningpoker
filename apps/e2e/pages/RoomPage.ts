@@ -35,6 +35,7 @@ export class RoomPage {
   readonly cardPicker: Locator;
   readonly voteReveal: Locator;
   readonly participantList: Locator;
+  readonly countdownDisplay: Locator;
 
   constructor(page: Page) {
     this.page = page;
@@ -62,10 +63,20 @@ export class RoomPage {
     this.cardPicker = page.getByTestId("card-picker");
     this.voteReveal = page.getByTestId("vote-reveal");
     this.participantList = page.getByTestId("participant-list");
+    this.countdownDisplay = page.getByTestId("countdown-display");
   }
 
   async goto() {
     await this.page.goto("/");
+  }
+
+  async gotoRoom(roomId: string) {
+    await this.page.goto(`/?room=${roomId}`);
+  }
+
+  async selectCountdown(secs: 0 | 30 | 60 | 90) {
+    const label = secs === 0 ? "Off" : `${secs}s`;
+    await this.page.getByRole("button", { name: label, exact: true }).click();
   }
 
   async createRoom(roomName: string): Promise<string> {
@@ -84,6 +95,10 @@ export class RoomPage {
     // reliably across all browsers (avoids Firefox click-event issues with React 19).
     await this.nameInput.press("Enter");
     await this.roomHeading.waitFor({ state: "visible" });
+    // Wait for the server to confirm the join: participant list shows our own name.
+    // Without this, tests proceed before the WS has connected and JoinRoom was processed,
+    // causing alice.waitForParticipantByName("Bob") to race against Alice's own join.
+    await this.participantList.getByText(displayName, { exact: false }).waitFor({ state: "visible" });
   }
 
   async waitForConnected() {

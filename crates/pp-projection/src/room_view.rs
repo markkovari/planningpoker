@@ -46,6 +46,7 @@ pub struct RoomView {
     pub id: String,
     pub name: String,
     pub deck_type: DeckType,
+    pub facilitator_id: String,
     pub participants: Vec<ParticipantView>,
     pub active_session: Option<SessionView>,
     pub ticket_queue: Vec<TicketView>,
@@ -74,20 +75,12 @@ fn apply_room_event(room: &mut RoomView, event: &RoomEvent) {
             facilitator_id,
             ..
         } => {
-            let participants = if facilitator_id.is_empty() {
-                vec![]
-            } else {
-                vec![ParticipantView {
-                    id: facilitator_id.clone(),
-                    display_name: "Facilitator".to_string(),
-                    role: Role::Facilitator,
-                }]
-            };
             *room = RoomView {
                 id: room_id.clone(),
                 name: name.clone(),
                 deck_type: *deck_type,
-                participants,
+                facilitator_id: facilitator_id.clone(),
+                participants: vec![],
                 active_session: None,
                 ticket_queue: vec![],
             };
@@ -313,22 +306,14 @@ impl RoomProjection {
                 facilitator_id,
                 ..
             } => {
-                let initial_participants = if facilitator_id.is_empty() {
-                    vec![]
-                } else {
-                    vec![ParticipantView {
-                        id: facilitator_id.clone(),
-                        display_name: "Facilitator".to_string(),
-                        role: Role::Facilitator,
-                    }]
-                };
                 self.rooms.insert(
                     room_id.clone(),
                     RoomView {
                         id: room_id.clone(),
                         name: name.clone(),
                         deck_type: *deck_type,
-                        participants: initial_participants,
+                        facilitator_id: facilitator_id.clone(),
+                        participants: vec![],
                         active_session: None,
                         ticket_queue: vec![],
                     },

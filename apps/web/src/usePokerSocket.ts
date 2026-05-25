@@ -32,7 +32,11 @@ export function usePokerSocket(url: string) {
 
     socket.onclose = () => {
       setConnected(false);
-      if (!stopped.current) {
+      // Guard: only reconnect if this socket is still the active one.
+      // When the URL changes, a new socket replaces ws.current before onclose fires on
+      // the old socket. Without this check, the old socket's onclose would schedule a
+      // reconnect with the stale URL, creating a second connection to the wrong DO.
+      if (!stopped.current && ws.current === socket) {
         reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
       }
     };

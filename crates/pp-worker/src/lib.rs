@@ -24,6 +24,17 @@ fn jsnull() -> JsValue {
 
 #[event(fetch)]
 async fn main_fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    if let Ok(limiter) = env.rate_limiter("RATE_LIMITER") {
+        let ip = req
+            .headers()
+            .get("CF-Connecting-IP")?
+            .unwrap_or_else(|| "unknown".to_string());
+        let outcome = limiter.limit(ip).await?;
+        if !outcome.success {
+            return Response::error("Too Many Requests", 429);
+        }
+    }
+
     let url = req.url()?;
     let path = url.path();
 
@@ -51,9 +62,34 @@ async fn main_fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 #[event(scheduled)]
 async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    if let Err(e) = cleanup_expired_data(&env).await {
+        console_error!("Cleanup failed: {e}");
+    }
     if let Err(e) = run_jira_sync(env).await {
         console_error!("Jira cron failed: {e}");
     }
+}
+
+async fn cleanup_expired_data(env: &Env) -> Result<()> {
+    let db = env.d1("DB")?;
+    let now = js_sys::Date::now();
+    db.prepare(
+        "DELETE FROM events WHERE room_id IN (SELECT room_id FROM rooms WHERE expires_at < ?1)",
+    )
+    .bind(&[jsf(now)])?
+    .run()
+    .await?;
+    db.prepare(
+        "DELETE FROM completed_sessions WHERE room_id IN (SELECT room_id FROM rooms WHERE expires_at < ?1)",
+    )
+    .bind(&[jsf(now)])?
+    .run()
+    .await?;
+    db.prepare("DELETE FROM rooms WHERE expires_at < ?1")
+        .bind(&[jsf(now)])?
+        .run()
+        .await?;
+    Ok(())
 }
 
 async fn route_to_room_do(req: Request, env: Env) -> Result<Response> {

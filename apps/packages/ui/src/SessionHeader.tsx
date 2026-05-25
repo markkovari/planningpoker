@@ -6,9 +6,10 @@ interface SessionHeaderProps {
   session: SessionView | null;
   onReveal: () => void;
   onReset: () => void;
+  isFacilitator?: boolean;
 }
 
-export function SessionHeader({ session, onReveal, onReset }: SessionHeaderProps) {
+export function SessionHeader({ session, onReveal, onReset, isFacilitator = false }: SessionHeaderProps) {
   if (!session) return (
     <p data-testid="no-session" className="text-sm text-[hsl(var(--muted-foreground))] italic">
       No active session
@@ -34,10 +35,10 @@ export function SessionHeader({ session, onReveal, onReset }: SessionHeaderProps
       </div>
       {!session.revealed && (
         <div className="flex flex-wrap gap-2">
-          <Button data-testid="reveal-btn" onClick={onReveal} size="sm" className="flex-1 sm:flex-none">
+          <Button data-testid="reveal-btn" onClick={onReveal} size="sm" className="flex-1 sm:flex-none" disabled={!isFacilitator}>
             Reveal Votes
           </Button>
-          <Button data-testid="reset-btn" onClick={onReset} variant="outline" size="sm" className="flex-1 sm:flex-none">
+          <Button data-testid="reset-btn" onClick={onReset} variant="outline" size="sm" className="flex-1 sm:flex-none" disabled={!isFacilitator}>
             Reset
           </Button>
         </div>

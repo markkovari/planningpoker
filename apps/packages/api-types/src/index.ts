@@ -48,6 +48,7 @@ export interface RoomView {
   id: string;
   name: string;
   deck_type: DeckType;
+  facilitator_id: string;
   participants: ParticipantView[];
   active_session: SessionView | null;
   ticket_queue: TicketView[];
@@ -56,7 +57,7 @@ export interface RoomView {
 // ---- WebSocket: client → server ----
 
 export type ClientMessage =
-  | { type: "CreateRoom"; name: string; deck_type?: DeckType }
+  | { type: "CreateRoom"; name: string; deck_type?: DeckType; creator_id: string }
   | { type: "AddTicket"; room_id: string; title: string; description?: string }
   | { type: "JoinRoom"; room_id: string; participant_id: string; display_name: string }
   | { type: "CastVote"; room_id: string; session_id: string; card: string }

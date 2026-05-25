@@ -41,7 +41,11 @@ export function ParticipantList({ participants, votes, revealed }: ParticipantLi
           >
             <span data-testid={`participant-name-${p.id}`} className="flex flex-col sm:flex-row sm:items-center sm:gap-2 min-w-0">
               <span className="font-medium text-sm truncate">{p.display_name}</span>
-              <span className="text-xs text-[hsl(var(--muted-foreground))]">({p.role})</span>
+              {p.role === "Facilitator" ? (
+                <Badge data-testid="facilitator-badge" variant="secondary" className="text-xs shrink-0">Facilitator</Badge>
+              ) : (
+                <span className="text-xs text-[hsl(var(--muted-foreground))]">({p.role})</span>
+              )}
             </span>
             <span data-testid={`participant-vote-${p.id}`}>{badge}</span>
           </li>
