@@ -12,6 +12,17 @@ class_name = "RoomObject"
 
 [[migrations]]
 tag = "v1"
+new_classes = ["RoomObject"]
+
+[[migrations]]
+tag = "v2"
+
+[[migrations]]
+tag = "v3"
+deleted_classes = ["RoomObject"]
+
+[[migrations]]
+tag = "v4"
 new_sqlite_classes = ["RoomObject"]
 
 [[d1_databases]]

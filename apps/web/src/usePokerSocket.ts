@@ -2,10 +2,15 @@ import type { ClientMessage, RoomView, ServerMessage } from "@planning-poker/api
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const RECONNECT_DELAY_MS = 2000;
+// Only show the "Reconnecting" banner after this many ms of being disconnected.
+// Hides the brief dropout when intentionally switching to a room DO after CreateRoom.
+const RECONNECT_BANNER_DELAY_MS = 2000;
 
 export function usePokerSocket(url: string) {
   const [room, setRoom] = useState<RoomView | null>(null);
   const [connected, setConnected] = useState(false);
+  const [visiblyDisconnected, setVisiblyDisconnected] = useState(false);
+  const disconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createdRoomId, setCreatedRoomId] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -23,6 +28,11 @@ export function usePokerSocket(url: string) {
 
     socket.onopen = () => {
       setConnected(true);
+      if (disconnectTimer.current) {
+        clearTimeout(disconnectTimer.current);
+        disconnectTimer.current = null;
+      }
+      setVisiblyDisconnected(false);
       setError(null);
       for (const msg of queue.current) {
         socket.send(JSON.stringify(msg));
@@ -32,6 +42,10 @@ export function usePokerSocket(url: string) {
 
     socket.onclose = () => {
       setConnected(false);
+      disconnectTimer.current = setTimeout(
+        () => setVisiblyDisconnected(true),
+        RECONNECT_BANNER_DELAY_MS,
+      );
       // Guard: only reconnect if this socket is still the active one.
       // When the URL changes, a new socket replaces ws.current before onclose fires on
       // the old socket. Without this check, the old socket's onclose would schedule a
@@ -68,6 +82,7 @@ export function usePokerSocket(url: string) {
     return () => {
       stopped.current = true;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (disconnectTimer.current) clearTimeout(disconnectTimer.current);
       ws.current?.close();
     };
   }, [connect]);
@@ -80,5 +95,5 @@ export function usePokerSocket(url: string) {
     }
   }, []);
 
-  return { room, connected, error, createdRoomId, countdown, jiraLinked, send };
+  return { room, connected, visiblyDisconnected, error, createdRoomId, countdown, jiraLinked, send };
 }

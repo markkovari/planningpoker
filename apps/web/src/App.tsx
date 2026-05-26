@@ -110,7 +110,7 @@ export function App() {
   const [wsUrl, setWsUrl] = useState(
     initialRoomId ? `${WS_BASE}?room=${initialRoomId}` : WS_BASE
   );
-  const { room, connected, error, createdRoomId, countdown, jiraLinked, send } = usePokerSocket(wsUrl);
+  const { room, connected, visiblyDisconnected, error, createdRoomId, countdown, jiraLinked, send } = usePokerSocket(wsUrl);
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [roomId, setRoomId] = useState(initialRoomId);
@@ -146,6 +146,19 @@ export function App() {
   const [showResumePrompt, setShowResumePrompt] = useState(
     () => !!(lastSession && (lastSession.roomId === urlRoomId || !urlRoomId))
   );
+  // Show focused join prompt when an invite link is opened (unless it's the user's own previous room)
+  const [showJoinPrompt, setShowJoinPrompt] = useState(
+    () => !!initialRoomId && lastSession?.roomId !== initialRoomId
+  );
+
+  const dismissJoinPrompt = () => {
+    setShowJoinPrompt(false);
+    setRoomId("");
+    setWsUrl(WS_BASE);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("room");
+    window.history.replaceState(null, "", url.toString());
+  };
 
   // Jira form state
   const [showJiraForm, setShowJiraForm] = useState(false);
@@ -287,6 +300,34 @@ export function App() {
 
         <main className="flex-1 flex items-start sm:items-center justify-center p-4 sm:p-6 overflow-y-auto">
           <div className="w-full max-w-md space-y-6 py-4">
+            {showJoinPrompt ? (
+              <Card className="border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5">
+                <CardHeader>
+                  <CardTitle>Join room</CardTitle>
+                  <CardDescription>You were invited to a planning poker session.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={(e) => { e.preventDefault(); setShowJoinPrompt(false); join(); }} className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="join-prompt-name">Your name</Label>
+                      <Input
+                        id="join-prompt-name"
+                        data-testid="name-input"
+                        autoFocus
+                        placeholder="Alice"
+                        value={displayName}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDisplayName(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button data-testid="join-btn" type="submit" className="flex-1" disabled={!displayName.trim()}>Join</Button>
+                      <Button type="button" variant="outline" className="flex-1" onClick={dismissJoinPrompt}>Not now</Button>
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+            ) : (
+            <>
             {showResumePrompt && lastSession && (
               <Card className="border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5">
                 <CardContent className="pt-4 pb-4 space-y-3">
@@ -318,6 +359,17 @@ export function App() {
                     minLength={2}
                     value={roomName}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRoomName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="create-display-name">Your name</Label>
+                  <Input
+                    id="create-display-name"
+                    data-testid="create-name-input"
+                    placeholder="Alice"
+                    required
+                    value={displayName}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDisplayName(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -370,7 +422,7 @@ export function App() {
                   data-testid="create-room-btn"
                   type="submit"
                   className="w-full"
-                  disabled={!roomName.trim()}
+                  disabled={!roomName.trim() || !displayName.trim()}
                 >
                   Create Room
                 </Button>
@@ -443,6 +495,8 @@ export function App() {
                 </form>
               </CardContent>
             </Card>
+            </>
+            )}
           </div>
         </main>
       </PageShell>
@@ -468,13 +522,13 @@ export function App() {
           )}
         </div>
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {!connected && (
+          {visiblyDisconnected && (
             <span className="flex items-center gap-1 text-xs text-amber-500 font-medium">
               <WifiOff className="h-3 w-3" />
               <span className="hidden sm:inline">Reconnecting…</span>
             </span>
           )}
-          {error && connected && (
+          {error && !visiblyDisconnected && (
             <span data-testid="error-msg" className="text-xs text-red-500 hidden sm:inline">{error}</span>
           )}
           <Button
